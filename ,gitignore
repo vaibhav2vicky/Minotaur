@@ -1,0 +1,68 @@
+# Database files (SQLite)
+database/*.db
+database/*.db-journal
+*.db
+*.db-journal
+
+# Python virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Flask / SocketIO
+instance/
+.webassets-cache
+
+# Log files
+logs/
+*.log
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+minotaur_agent_*
+agent.exe
+
+# Go module files (generated during build)
+go.mod
+go.sum
+
+# Temporary build directories
+/tmp/
+temp/
+
+# IDE / editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Sensitive configuration (if any)
+config/secret_*.py
+*.env
+.env
+
+# Uploads / exfiltrated files (if stored locally)
+uploads/
+exfiltrated/
+
+# Backup files
+*.bak
+*.backup
+
+# OS metadata
+Thumbs.db
+desktop.ini
