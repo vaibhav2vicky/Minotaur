@@ -26,6 +26,7 @@ logs/
 *.log
 
 # Go build artifacts
+agents/go/*.exe
 *.exe
 *.exe~
 *.dll
@@ -66,3 +67,5 @@ exfiltrated/
 # OS metadata
 Thumbs.db
 desktop.ini
+
+agents/go/
