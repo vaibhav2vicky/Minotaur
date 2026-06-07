@@ -91,3 +91,19 @@ class ActivityLogger:
         rows = c.fetchall()
         conn.close()
         return [{'agent_id': r[0], 'type': r[1], 'payload': r[2], 'output': r[3], 'error': r[4], 'sent_at': r[5], 'completed_at': r[6]} for r in rows]
+
+    def get_distinct_victim_ids(self):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT DISTINCT victim_id FROM shell_activity ORDER BY victim_id")
+        rows = c.fetchall()
+        conn.close()
+        return [row[0] for row in rows]
+
+    def get_distinct_agent_ids(self):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT DISTINCT agent_id FROM agent_activity ORDER BY agent_id")
+        rows = c.fetchall()
+        conn.close()
+        return [row[0] for row in rows]

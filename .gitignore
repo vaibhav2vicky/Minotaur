@@ -25,17 +25,20 @@ instance/
 logs/
 *.log
 
-# Go build artifacts
-agents/go/*.exe
+# Go build artifacts – exclude compiled agent binaries
+minotaur_agent_*
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-minotaur_agent_*
 agent.exe
+*.out
 
-# Go module files (generated during build)
+# Agent static files (built binaries stored in web/static/agents)
+web/static/agents/*
+
+# Go module files (generated during build – not needed in repo)
 go.mod
 go.sum
 
@@ -67,5 +70,3 @@ exfiltrated/
 # OS metadata
 Thumbs.db
 desktop.ini
-
-agents/go/

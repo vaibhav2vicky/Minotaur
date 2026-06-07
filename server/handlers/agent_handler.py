@@ -177,17 +177,18 @@ class AgentManager:
         self.socketio.emit('exfil_received', {'agent_id': agent_id, 'file_path': file_path})
 
     def delete_agent(self, agent_id):
+        # Only mark as deleted and remove pending commands – keep all logs (results, exfil, etc.)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("UPDATE agents SET status='deleted' WHERE id=?", (agent_id,))
-        c.execute("DELETE FROM agent_commands WHERE agent_id=?", (agent_id,))
-        c.execute("DELETE FROM agent_results WHERE agent_id=?", (agent_id,))
-        c.execute("DELETE FROM agent_exfil WHERE agent_id=?", (agent_id,))
+        # Delete pending commands only (optional, but keep history)
+        c.execute("DELETE FROM agent_commands WHERE agent_id=? AND status='pending'", (agent_id,))
         conn.commit()
         conn.close()
         self.socketio.emit('agent_deleted', {'agent_id': agent_id})
 
     def clear_all_agents(self):
+        # WARNING: This deletes all agent records (including logs). Keep if desired.
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("DELETE FROM agents")

