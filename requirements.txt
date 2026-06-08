@@ -1,4 +1,5 @@
-flask==2.2.2
-werkzeug==2.2.2
-flask-socketio==5.3.4
-python-socketio==5.9.0
+flask>=3.0.0
+werkzeug>=3.0.0
+flask-socketio>=5.3.6
+python-socketio>=5.11.0
+cryptography>=42.0.0

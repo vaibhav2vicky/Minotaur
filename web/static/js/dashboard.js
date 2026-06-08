@@ -177,6 +177,9 @@ function updateCommandArgs() {
         }
     });
 }
+
+
+
 $('#agent-cmd-type').change(updateCommandArgs);
 updateCommandArgs();
 $('#agent-exec-btn').click(() => {
