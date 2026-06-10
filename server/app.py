@@ -81,7 +81,7 @@ def build_agent_impl(data):
     if jitter < 0:
         jitter = 0
 
-    template_path = os.path.join(os.path.dirname(__file__), 'agent_template.go')
+    template_path = os.path.join(os.path.dirname(__file__), "../agents/go/agent.go")
     if not os.path.exists(template_path):
         return {'error': 'Agent template not found'}, 500
 
