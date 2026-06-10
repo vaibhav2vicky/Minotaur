@@ -11,4 +11,4 @@ Only the latest version of Minotaur C2 receives security updates.
 
 ## Reporting a Vulnerability
 
-Please report security vulnerabilities by email to [your‑email@example.com] or open a **draft security advisory** on GitHub. We will respond within 48 hours.
+Please report security vulnerabilities open a **draft security advisory** on GitHub. We will respond within 48 hours.
