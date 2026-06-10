@@ -75,6 +75,7 @@ c2_framework/
 ## Requirements
 
 ### System Requirements
+
 - Python 3.7 or higher
 - Go 1.16 or higher (for building agents)
 - Unix/Linux or macOS system (run.sh uses bash)
@@ -94,6 +95,7 @@ See [requirements.txt](requirements.txt) for the complete list.
 ### Quick Start
 
 1. **Clone or download the project**:
+
    ```bash
    cd c2_framework
    ```
@@ -105,6 +107,7 @@ See [requirements.txt](requirements.txt) for the complete list.
    ```
 
 The script will:
+
 - Check for Python 3
 - Create a virtual environment if needed
 - Install required dependencies
@@ -113,19 +116,21 @@ The script will:
 ### Manual Installation
 
 1. **Create a virtual environment**:
+
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
 2. **Install dependencies**:
+
    ```bash
    pip install -r requirements.txt
    ```
 
 3. **Start the server**:
    ```bash
-   python server/app.py
+   python3 server/app.py
    ```
 
 ## Usage
@@ -141,6 +146,7 @@ The server will start on `http://127.0.0.1:5000` by default.
 ### Accessing the Dashboard
 
 Open your web browser and navigate to:
+
 ```
 http://127.0.0.1:5000
 ```
@@ -176,6 +182,7 @@ Once agents connect to the server:
 ### Server Configuration
 
 Edit `server/app.py` to modify:
+
 - **Database Path**: Change `DB_PATH` for custom database location
 - **Agent Storage**: Modify `AGENT_STORAGE` for agent binary storage
 - **Secret Key**: Update Flask secret key for production use
@@ -184,6 +191,7 @@ Edit `server/app.py` to modify:
 ### Agent Configuration
 
 Edit `agents/go/main.go` to modify default agent settings:
+
 - **ServerURL**: Default C2 server address
 - **BeaconDelay**: Default check-in interval
 - **Jitter**: Default beacon variance
@@ -192,18 +200,21 @@ Edit `agents/go/main.go` to modify default agent settings:
 ### Environment Variables
 
 Configure the following if needed:
+
 - `FLASK_ENV`: Set to 'development' or 'production'
 - `FLASK_DEBUG`: Enable/disable debug mode
 
 ## API Endpoints
 
 ### Dashboard Application
+
 - `GET /`: Dashboard home page
 - `GET /agents`: List all connected agents
 - `POST /build-agent`: Build a custom agent
 - WebSocket: Real-time agent communication
 
 ### Agent Application
+
 - `POST /register`: Agent registration endpoint
 - `GET /command`: Agent polls for commands
 - `POST /response`: Agent posts command responses
@@ -211,6 +222,7 @@ Configure the following if needed:
 ## Database
 
 The application uses SQLite for persistence. The database is automatically created at `database/c2.db` and includes tables for:
+
 - **victims**: Connected agents with system information
 - **port_events**: Network port activity tracking
 - **activity_logs**: Historical record of all C2 operations
@@ -218,6 +230,7 @@ The application uses SQLite for persistence. The database is automatically creat
 ## Logging
 
 Application logs are stored in the `logs/` directory. Log files include:
+
 - Server startup and shutdown events
 - Agent connections and disconnections
 - Command execution history
