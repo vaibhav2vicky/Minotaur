@@ -1,41 +1,43 @@
 # Minotaur C2 Framework Developer Guide
 
-This guide is intended for developers working on the Minotaur C2 Framework codebase.
+This guide helps developers working on the Minotaur C2 Framework codebase.
 
 ## Project Goals
 
-- Maintain a dual-server architecture that separates the agent API from the dashboard.
-- Provide a web dashboard for managing agents, commands, and listener ports.
-- Build Go-based agent binaries dynamically for target platforms.
-- Store operational data in a SQLite database.
+- Maintain a dual-server architecture separating the agent API from the dashboard.
+- Provide a browser-based dashboard for managing agents, commands, and listener ports.
+- Build Go-based agent binaries dynamically for configured platforms.
+- Persist operational state in a SQLite database.
 
 ## Repository Layout
 
 - `agents/go/agent.go`
-  - Agent template source code used by the build endpoint.
-- `config/settings.py`
-  - Shared configuration settings.
+  - Primary Go agent template used by the build process.
+- `agents/go/agent_unix.go`
+  - Unix-specific Go helper code for the generated agent.
+- `agents/go/agent_windows.go`
+  - Windows-specific Go helper code for the generated agent.
 - `database/`
   - SQLite database file created at runtime.
 - `logs/`
-  - Application logs directory.
+  - Application log directory.
 - `server/app.py`
   - Main application entrypoint.
-  - Launches two services: agent API on port `5000` and dashboard on port `5001`.
+  - Runs agent API on port `5000` and dashboard on port `5001`.
 - `server/handlers/`
-  - Logic for agent lifecycle, commands, activity logging, and victims.
+  - Business logic for agent lifecycle, commands, and activity logging.
 - `server/listeners/`
-  - Port listener management and TCP listener implementation.
+  - TCP listener and port management logic.
 - `server/models/`
-  - Data model helpers for victims and port events.
-- `server/utils/`
-  - Cryptography helpers and logging setup.
+  - Victim and port event persistence helpers.
+- `server/utils/logger.py`
+  - Logging setup for the application.
 - `web/`
   - Dashboard templates and static assets.
 - `requirements.txt`
   - Python dependency list.
 - `run.sh`
-  - Startup script for environment setup and launching the server.
+  - Startup script for environment validation and server launch.
 
 ## Development Setup
 
@@ -76,93 +78,97 @@ This guide is intended for developers working on the Minotaur C2 Framework codeb
 
 ## Application Behavior
 
-- `server/app.py` starts two services:
-  - `agent_app` on `0.0.0.0:5000`
-  - `dashboard_app` on `127.0.0.1:5001`
-- The dashboard is served from `web/templates/dashboard.html`.
-- Agent binaries are stored under `web/static/agents/versions/`.
-- Agent metadata and version info are persisted in `database/c2.db`.
+- `server/app.py` initializes two Flask apps and a Socket.IO dashboard.
+- `agent_app` listens on `0.0.0.0:5000` for agent traffic.
+- `dashboard_app` listens on `127.0.0.1:5001` for the dashboard UI.
+- The dashboard uses `web/templates/dashboard.html` and `web/static/js/dashboard.js`.
+- Compiled agent binaries are stored in `web/static/agents/versions/`.
+- Agent version metadata is recorded in `database/c2.db`.
 
-## Useful Files and Components
+## Key Components
 
 ### `server/app.py`
 
-- `build_agent_impl(data)` compiles agents from `agents/go/agent.go`.
-- Uses environment variables `GOOS`, `GOARCH`, and `CGO_ENABLED=0` for cross-compilation.
-- Stores compiled binaries and maintains agent version records in SQLite.
-- Exposes both agent and dashboard endpoints.
+- Contains the main request routing for both agent and dashboard APIs.
+- Implements `build_agent_impl(data)` to generate Go sources, compile the agent, and store binaries.
+- Uses `SocketIO` for dashboard client connections.
+- Runs both services concurrently using `threading.Thread`.
 
 ### `server/handlers/agent_handler.py`
 
-- Tracks agent registrations and state.
-- Handles incoming beacons, pending commands, and command results.
+- Manages agent registration and state.
+- Tracks pending commands and stores command results.
+- Coordinates agent-specific activity updates.
 
 ### `server/handlers/command_handler.py`
 
-- Dispatches commands to individual agents or entire OS groups.
-- Creates command objects for agents to consume on next beacon.
+- Sends commands to a single agent or all agents of a given OS type.
+- Supports command dispatch through the dashboard execute flow.
 
 ### `server/handlers/activity_logger.py`
 
-- Stores shell and agent activity logs.
-- Supports exporting logs via dashboard endpoints.
+- Records shell activity and agent event history.
+- Provides query APIs for logs, including export support.
 
 ### `server/listeners/port_manager.py`
 
-- Opens and stops listener ports.
-- Manages active listening sockets and port event history.
+- Starts and stops TCP listeners.
+- Tracks active listeners and forwards new connections to `TCPListener`.
+
+### `server/listeners/tcp_listener.py`
+
+- Waits for inbound connections on managed ports.
+- Emits dashboard socket events for new connections and shell output.
 
 ### `agents/go/agent.go`
 
-- Template source code for agent binaries.
-- Contains placeholder tokens replaced by the build process.
-- Supports optional RSA auth, beaconing, command polling, and file exfiltration.
+- The Go template for generated agents.
+- Contains placeholders injected by the build process.
+- Supports optional auth, beaconing, command polling, and exfil.
 
 ## Extending the Codebase
 
 ### Add a new API route
 
-- Determine whether the route belongs to the agent API or the dashboard.
-- Add the route to `server/app.py` under the appropriate Flask app.
-- If the route affects data, update handlers or models as needed.
-- Add frontend support in `web/templates/dashboard.html` and `web/static/js/dashboard.js` if needed.
+- Add the new route to `server/app.py` under either `agent_app` or `dashboard_app`.
+- Update the related handler or model if the route requires persistence or business logic.
+- Add dashboard integration in `web/templates/dashboard.html` and `web/static/js/dashboard.js` as needed.
 
 ### Add a new dashboard feature
 
-- Modify the template in `web/templates/dashboard.html`.
-- Update `web/static/js/dashboard.js` to make API calls and handle UI events.
-- Use the existing `SocketIO` live update pattern for real-time state changes.
+- Update the dashboard template and JavaScript to call the new endpoint.
+- Leverage existing Socket.IO updates for real-time UI state changes.
+- Keep dashboard behavior in `web/static/js/dashboard.js`.
 
 ### Add support for a new agent platform
 
-- Confirm the platform name and architecture values are valid for Go compilation.
-- Update the dashboard UI to present the new option.
-- The build flow will automatically compile with `GOOS` and `GOARCH`.
+- Verify the platform and architecture values are valid for Go cross-compilation.
+- Add the new option to the dashboard UI if necessary.
+- The existing builder will compile with `GOOS` and `GOARCH`.
 
 ## Database Notes
 
 - The SQLite database is created at `database/c2.db` if it does not exist.
-- `agent_versions` stores compiled binary metadata.
-- `agent_current_version` tracks the active version per platform.
-- Existing victim and port event tables are managed by the handlers and models.
+- `agent_versions` stores metadata for compiled binaries.
+- `agent_current_version` stores the current version selection for each platform.
+- Victim and port event tables are managed by the model and listener code.
 
 ## Testing and Debugging
 
-- For quick debugging, use `debug_mode` when building an agent.
-- Add log statements using the logger helpers in `server/utils/logger.py`.
-- Confirm agent build output and endpoint behavior by testing the dashboard UI.
+- Use `debug_mode` when building an agent to disable release linker flags.
+- Add logging in `server/utils/logger.py` and call it from `server/app.py` or handlers.
+- Validate endpoint behavior using the dashboard or direct API requests.
 
 ## Conventions
 
-- Keep configuration values in `server/app.py` and `config/settings.py`.
+- Keep shared configuration constants in `server/app.py`.
 - Use Flask JSON responses for API routes.
-- Prefer small, isolated changes when modifying agent build or endpoint logic.
-- Keep frontend state management inside `web/static/js/dashboard.js`.
+- Keep business logic within handlers and models rather than inside route functions.
+- Keep frontend code isolated in `web/static/js/dashboard.js`.
 
 ## Future Improvements
 
-- Add automated tests for API endpoints and handler logic.
-- Add a CLI wrapper or management commands for common tasks.
-- Introduce stricter configuration handling and environment variable support.
-- Add authentication for dashboard access.
-- Extend agent template with file upload/download support.
+- Add automated tests for the API layer and handler logic.
+- Add dashboard authentication and role-based access control.
+- Improve configuration handling with environment variables or a settings file.
+- Add file upload/download support to the agent template.

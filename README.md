@@ -1,26 +1,26 @@
 # Minotaur C2 Framework
 
-A Command & Control (C2) framework for managing and communicating with deployed agents across multiple target systems. Minotaur provides a centralized server for agent deployment, command execution, and activity monitoring.
+A Command & Control (C2) framework for managing and communicating with deployed agents across multiple target systems. Minotaur provides a centralized server for agent deployment, command execution, listener management, and activity logging.
 
 ## Overview
 
-Minotaur is a Flask-based C2 framework designed for authorized security testing and red team operations. It includes:
+Minotaur is a Flask-based C2 framework designed for authorized security testing and red team exercises. It includes:
 
-- **Agent API**: Handles agent registration, beaconing, command results, and file exfiltration
-- **Dashboard**: Web-based UI for managing agents, commands, and port listeners
-- **Agent Builder**: Generates Go-based agent binaries for target platforms
-- **Database**: SQLite persistence layer for agents, logs, and version metadata
+- **Agent API**: agent registration, beacon polling, command results, file exfiltration, and shell instructions
+- **Dashboard**: Web UI for managing agents, building binaries, and monitoring activity
+- **Agent Builder**: Builds Go-based agent binaries for selected platforms
+- **Database**: SQLite persistence for victims, port events, agent versions, and activity logs
 
 ## Features
 
-- **Multi-platform agent build**: Compile agent binaries for Windows and Linux targets
-- **Dual-server architecture**: Separate agent API and dashboard services
-- **Real-time dashboard**: Interactive interface with WebSocket updates
-- **Remote command execution**: Send commands to individual agents or OS groups
-- **Activity logging**: Track shell and agent activity
-- **Port management**: Start and stop listener ports from the dashboard
-- **Agent versioning**: Manage compiled agent binaries and current versions
-- **Optional RSA authentication**: Secure agent communications with RSA keys
+- **Multi-platform agent build**: Compile Go agent binaries for configurable OS/ARCH pairs
+- **Dual-server architecture**: agent API on `5000` and dashboard on `5001`
+- **Real-time dashboard updates**: WebSocket-driven dashboard refreshes
+- **Remote command execution**: send commands to individual agents or OS groups
+- **Shell listener management**: open, stop, and inspect TCP listener ports
+- **Agent versioning**: store compiled versions and select current platform versions
+- **Optional RSA authentication**: generate RSA keypairs on build
+- **Log export**: export shell or agent activity as text files
 
 ## Project Structure
 
@@ -28,9 +28,9 @@ Minotaur is a Flask-based C2 framework designed for authorized security testing 
 c2_framework/
 ├── agents/
 │   └── go/
-│       └── agent.go
-├── config/
-│   └── settings.py
+│       ├── agent.go
+│       ├── agent_unix.go
+│       └── agent_windows.go
 ├── database/
 │   └── c2.db
 ├── logs/
@@ -39,8 +39,7 @@ c2_framework/
 │   ├── handlers/
 │   │   ├── activity_logger.py
 │   │   ├── agent_handler.py
-│   │   ├── command_handler.py
-│   │   └── victim_handler.py
+│   │   └── command_handler.py
 │   ├── listeners/
 │   │   ├── port_manager.py
 │   │   └── tcp_listener.py
@@ -48,22 +47,17 @@ c2_framework/
 │   │   ├── port_event.py
 │   │   └── victim.py
 │   └── utils/
-│       ├── crypto.py
 │       └── logger.py
 ├── web/
 │   ├── static/
 │   │   ├── agents/
 │   │   │   └── versions/
-│   │   │       ├── linux_amd64/
-│   │   │       ├── windows_amd64/
-│   │   │       └── windows_arm64/
 │   │   ├── css/
 │   │   │   └── dashboard.css
 │   │   └── js/
 │   │       └── dashboard.js
 │   └── templates/
-│       ├── dashboard.html
-│       └── index.html
+│       └── dashboard.html
 ├── requirements.txt
 ├── run.sh
 ├── LICENSE
@@ -86,19 +80,19 @@ c2_framework/
 - `python-socketio>=5.11.0`
 - `cryptography>=42.0.0`
 
-See [requirements.txt](requirements.txt) for the complete list.
+See `requirements.txt` for the full list.
 
 ## Installation
 
 ### Quick Start
 
-1. **Clone or download the project**:
+1. Clone or download the project:
 
    ```bash
    cd c2_framework
    ```
 
-2. **Run the startup script**:
+2. Run the startup script:
 
    ```bash
    chmod +x run.sh
@@ -114,20 +108,20 @@ The script will:
 
 ### Manual Installation
 
-1. **Create and activate a virtual environment**:
+1. Create and activate a virtual environment:
 
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
    ```
 
-2. **Install dependencies**:
+2. Install dependencies:
 
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Start the server**:
+3. Start the server:
 
    ```bash
    python3 server/app.py
@@ -141,42 +135,42 @@ The script will:
 ./run.sh
 ```
 
-The application starts two services:
+The application launches two services:
 
 - Agent API: `http://0.0.0.0:5000`
 - Dashboard UI: `http://127.0.0.1:5001`
 
 ### Accessing the Dashboard
 
-Open your browser and navigate to:
+Open your browser to:
 
-```
+```text
 http://127.0.0.1:5001
 ```
 
 ### Building Custom Agents
 
-Use the dashboard to build agent binaries for selected target platforms. Configure options such as:
+Use the dashboard to build agent binaries for your chosen platform and settings. Options include:
 
 - C2 URL
 - beacon delay (minimum 5 seconds)
 - jitter
-- user agent
-- platform and architecture
+- user agent string
+- target platform and architecture
 - enable auth
 - auto persistence
 - debug mode
 
-Then download the compiled binary from the dashboard.
+Built binaries are saved under `web/static/agents/versions/`.
 
 ### Command Execution
 
-Once agents connect:
+Once agents register and beacon in:
 
-- view connected agents in the dashboard
-- execute commands against single agents or OS groups
-- monitor responses and activity
-- review historical logs
+- view connected agents through the dashboard
+- execute commands against a single agent or OS group
+- issue shell reverse connections to listeners
+- monitor command results and activity logs
 
 ## Configuration
 
@@ -184,14 +178,14 @@ Once agents connect:
 
 Edit `server/app.py` to adjust:
 
-- `DB_PATH` for database storage
+- `DB_PATH` for SQLite storage
 - `AGENT_STORAGE` for compiled binaries
 - Flask `SECRET_KEY`
 - Socket.IO settings and CORS
 
 ### Agent Defaults
 
-Edit `agents/go/agent.go` to change default agent values such as:
+Modify `agents/go/agent.go` to update default agent settings such as:
 
 - `ServerURL`
 - `BeaconDelay`
@@ -200,13 +194,6 @@ Edit `agents/go/agent.go` to change default agent values such as:
 - `InsecureTLS`
 - `AutoPersistence`
 - `DebugMode`
-
-### Environment Variables
-
-Optional environment variables:
-
-- `FLASK_ENV`
-- `FLASK_DEBUG`
 
 ## API Endpoints
 
@@ -223,6 +210,7 @@ Optional environment variables:
 - `POST /api/agent/set_current_version`
 - `POST /api/agent/delete_version`
 - `GET /api/agents/list`
+- `GET /static/agents/<path:filename>`
 
 ### Dashboard API (`port 5001`)
 
@@ -252,33 +240,13 @@ Optional environment variables:
 
 ## Database
 
-The app uses SQLite at `database/c2.db` and includes tables for:
+The app uses SQLite at `database/c2.db` and stores:
 
-- `victims`
-- `port_events`
-- `activity_logs`
-- `agent_versions`
-- `agent_current_version`
-
-## Logging
-
-Logs are stored in the `logs/` directory and include:
-
-- startup and shutdown events
-- agent registration and beacon activity
-- command execution history
-- errors and warnings
-
-## Security Considerations
-
-⚠️ **Important**: Use this framework only for authorized testing and Education purpose.
-
-- change the Flask `SECRET_KEY` before production
-- use HTTPS in production deployments
-- enable RSA authentication for agent communications
-- implement access controls and network segmentation
-- monitor activity and log operations
-- use beacon delay and jitter to reduce detection risk
+- victim records
+- port event history
+- activity logs
+- compiled agent versions
+- current platform version selections
 
 ## License
 
