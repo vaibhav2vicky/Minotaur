@@ -4,89 +4,87 @@ A Command & Control (C2) framework for managing and communicating with deployed 
 
 ## Overview
 
-Minotaur is a full-featured C2 framework designed for authorized security testing and red team operations. It consists of:
+Minotaur is a Flask-based C2 framework designed for authorized security testing and red team operations. It includes:
 
-- **Server**: Python-based Flask application with WebSocket support
-- **Dashboard**: Web-based UI for managing agents and executing commands
-- **Agents**: Go-based agents deployed on target systems
-- **Database**: SQLite-based persistence layer for agent and activity tracking
+- **Agent API**: Handles agent registration, beaconing, command results, and file exfiltration
+- **Dashboard**: Web-based UI for managing agents, commands, and port listeners
+- **Agent Builder**: Generates Go-based agent binaries for target platforms
+- **Database**: SQLite persistence layer for agents, logs, and version metadata
 
 ## Features
 
-- **Multi-Platform Agent Deployment**: Build and deploy agents for Windows, Linux, and other architectures
-- **Real-Time Communication**: WebSocket-based agent communication with the C2 server
-- **Web Dashboard**: Intuitive interface for managing compromised systems
-- **Command Execution**: Execute commands remotely on compromised systems
-- **Activity Logging**: Comprehensive logging of all C2 operations and agent activities
-- **Agent Configuration**: Customize beacon delays, jitter, user agents, and encryption settings
-- **Port Management**: Monitor and manage network ports for listener deployment
-- **Cryptographic Support**: RSA-based authentication and secure communications
-- **Victim Management**: Track and manage connected agents with detailed system information
+- **Multi-platform agent build**: Compile agent binaries for Windows and Linux targets
+- **Dual-server architecture**: Separate agent API and dashboard services
+- **Real-time dashboard**: Interactive interface with WebSocket updates
+- **Remote command execution**: Send commands to individual agents or OS groups
+- **Activity logging**: Track shell and agent activity
+- **Port management**: Start and stop listener ports from the dashboard
+- **Agent versioning**: Manage compiled agent binaries and current versions
+- **Optional RSA authentication**: Secure agent communications with RSA keys
 
 ## Project Structure
 
 ```
 c2_framework/
 ├── agents/
-│   └── go/                          # Go-based agent source code
-│       └── main.go
+│   └── go/
+│       └── agent.go
 ├── config/
-│   └── settings.py                  # Configuration settings
+│   └── settings.py
 ├── database/
-│   └── c2.db                        # SQLite database (generated at runtime)
-├── logs/                            # Application logs directory
+│   └── c2.db
+├── logs/
 ├── server/
-│   ├── app.py                       # Main Flask application
-│   ├── agent_template.go            # Agent template for building custom agents
+│   ├── app.py
 │   ├── handlers/
-│   │   ├── activity_logger.py       # Logs all C2 operations
-│   │   ├── agent_handler.py         # Manages agent lifecycle
-│   │   ├── command_handler.py       # Executes commands on agents
-│   │   └── victim_handler.py        # Manages compromised systems
+│   │   ├── activity_logger.py
+│   │   ├── agent_handler.py
+│   │   ├── command_handler.py
+│   │   └── victim_handler.py
 │   ├── listeners/
-│   │   ├── port_manager.py          # Network port management
-│   │   └── tcp_listener.py          # TCP listener for agent connections
+│   │   ├── port_manager.py
+│   │   └── tcp_listener.py
 │   ├── models/
-│   │   ├── port_event.py            # Port event data model
-│   │   └── victim.py                # Victim/agent data model
+│   │   ├── port_event.py
+│   │   └── victim.py
 │   └── utils/
-│       ├── crypto.py                # Cryptographic utilities
-│       └── logger.py                # Logging utilities
+│       ├── crypto.py
+│       └── logger.py
 ├── web/
 │   ├── static/
-│   │   ├── agents/                  # Agent binary storage
-│   │   │   └── versions/            # Versioned agents by platform
+│   │   ├── agents/
+│   │   │   └── versions/
 │   │   │       ├── linux_amd64/
 │   │   │       ├── windows_amd64/
 │   │   │       └── windows_arm64/
 │   │   ├── css/
-│   │   │   └── dashboard.css        # Dashboard styling
+│   │   │   └── dashboard.css
 │   │   └── js/
-│   │       └── dashboard.js         # Dashboard client-side logic
+│   │       └── dashboard.js
 │   └── templates/
-│       ├── dashboard.html           # Main dashboard interface
-│       └── index.html               # Welcome page
-├── requirements.txt                 # Python dependencies
-├── run.sh                           # Startup script
-├── LICENSE                          # License information
-└── README.md                        # This file
+│       ├── dashboard.html
+│       └── index.html
+├── requirements.txt
+├── run.sh
+├── LICENSE
+└── README.md
 ```
 
 ## Requirements
 
 ### System Requirements
 
-- Python 3.7 or higher
-- Go 1.16 or higher (for building agents)
-- Unix/Linux or macOS system (run.sh uses bash)
+- Python 3.8 or higher
+- Go 1.16 or higher
+- Bash-compatible shell on Linux or macOS
 
 ### Python Dependencies
 
-- **Flask** ≥ 3.0.0: Web framework
-- **Werkzeug** ≥ 3.0.0: WSGI utilities
-- **Flask-SocketIO** ≥ 5.3.6: WebSocket support
-- **python-socketio** ≥ 5.11.0: Socket.IO client library
-- **cryptography** ≥ 42.0.0: Cryptographic operations
+- `flask>=3.0.0`
+- `werkzeug>=3.0.0`
+- `flask-socketio>=5.3.6`
+- `python-socketio>=5.11.0`
+- `cryptography>=42.0.0`
 
 See [requirements.txt](requirements.txt) for the complete list.
 
@@ -101,6 +99,7 @@ See [requirements.txt](requirements.txt) for the complete list.
    ```
 
 2. **Run the startup script**:
+
    ```bash
    chmod +x run.sh
    ./run.sh
@@ -108,18 +107,18 @@ See [requirements.txt](requirements.txt) for the complete list.
 
 The script will:
 
-- Check for Python 3
-- Create a virtual environment if needed
-- Install required dependencies
-- Start the server
+- verify Python 3 and Go are installed
+- create a virtual environment if needed
+- install required Python dependencies
+- start the backend services
 
 ### Manual Installation
 
-1. **Create a virtual environment**:
+1. **Create and activate a virtual environment**:
 
    ```bash
    python3 -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   source .venv/bin/activate
    ```
 
 2. **Install dependencies**:
@@ -129,6 +128,7 @@ The script will:
    ```
 
 3. **Start the server**:
+
    ```bash
    python3 server/app.py
    ```
@@ -141,112 +141,144 @@ The script will:
 ./run.sh
 ```
 
-The server will start on `http://127.0.0.1:5000` by default.
+The application starts two services:
+
+- Agent API: `http://0.0.0.0:5000`
+- Dashboard UI: `http://127.0.0.1:5001`
 
 ### Accessing the Dashboard
 
-Open your web browser and navigate to:
+Open your browser and navigate to:
 
 ```
-http://127.0.0.1:5000
+http://127.0.0.1:5001
 ```
 
 ### Building Custom Agents
 
-Use the dashboard to build custom agents for specific target platforms:
+Use the dashboard to build agent binaries for selected target platforms. Configure options such as:
 
-1. Navigate to the "Build Agent" section
-2. Configure agent options:
-   - **C2 URL**: Server address for agent callback
-   - **Beacon Delay**: Time between check-ins (minimum 5 seconds)
-   - **Jitter**: Random delay variance for beacon timing
-   - **User Agent**: HTTP user agent string
-   - **Platform**: Target OS (Windows, Linux, etc.) and architecture (amd64, arm64, etc.)
-   - **Enable Auth**: Use RSA encryption for agent communications
-   - **Auto Persistence**: Automatic persistence mechanisms
-   - **Debug Mode**: Verbose logging on the agent
+- C2 URL
+- beacon delay (minimum 5 seconds)
+- jitter
+- user agent
+- platform and architecture
+- enable auth
+- auto persistence
+- debug mode
 
-3. Download the compiled agent binary
+Then download the compiled binary from the dashboard.
 
 ### Command Execution
 
-Once agents connect to the server:
+Once agents connect:
 
-1. **View Connected Agents**: Dashboard displays all active agents with system information
-2. **Execute Commands**: Send commands to individual agents or groups by OS type
-3. **Monitor Activity**: View real-time command execution and responses
-4. **Track History**: Access historical logs of all C2 operations
+- view connected agents in the dashboard
+- execute commands against single agents or OS groups
+- monitor responses and activity
+- review historical logs
 
 ## Configuration
 
-### Server Configuration
+### Server Settings
 
-Edit `server/app.py` to modify:
+Edit `server/app.py` to adjust:
 
-- **Database Path**: Change `DB_PATH` for custom database location
-- **Agent Storage**: Modify `AGENT_STORAGE` for agent binary storage
-- **Secret Key**: Update Flask secret key for production use
-- **Socket.IO Settings**: Configure CORS and async mode
+- `DB_PATH` for database storage
+- `AGENT_STORAGE` for compiled binaries
+- Flask `SECRET_KEY`
+- Socket.IO settings and CORS
 
-### Agent Configuration
+### Agent Defaults
 
-Edit `agents/go/main.go` to modify default agent settings:
+Edit `agents/go/agent.go` to change default agent values such as:
 
-- **ServerURL**: Default C2 server address
-- **BeaconDelay**: Default check-in interval
-- **Jitter**: Default beacon variance
-- **UserAgent**: Default HTTP user agent
+- `ServerURL`
+- `BeaconDelay`
+- `Jitter`
+- `UserAgent`
+- `InsecureTLS`
+- `AutoPersistence`
+- `DebugMode`
 
 ### Environment Variables
 
-Configure the following if needed:
+Optional environment variables:
 
-- `FLASK_ENV`: Set to 'development' or 'production'
-- `FLASK_DEBUG`: Enable/disable debug mode
+- `FLASK_ENV`
+- `FLASK_DEBUG`
 
 ## API Endpoints
 
-### Dashboard Application
+### Agent API (`port 5000`)
 
-- `GET /`: Dashboard home page
-- `GET /agents`: List all connected agents
-- `POST /build-agent`: Build a custom agent
-- WebSocket: Real-time agent communication
+- `POST /api/agent/authenticate`
+- `POST /api/agent/register`
+- `POST /api/agent/beacon`
+- `POST /api/agent/result`
+- `POST /api/agent/exfil`
+- `POST /api/agent/shell`
+- `POST /api/build_agent`
+- `GET /api/agent/versions`
+- `POST /api/agent/set_current_version`
+- `POST /api/agent/delete_version`
+- `GET /api/agents/list`
 
-### Agent Application
+### Dashboard API (`port 5001`)
 
-- `POST /register`: Agent registration endpoint
-- `GET /command`: Agent polls for commands
-- `POST /response`: Agent posts command responses
+- `GET /`
+- `GET /api/victims`
+- `GET /api/agents`
+- `POST /api/execute`
+- `POST /api/set_os`
+- `POST /api/agent/send_command`
+- `POST /api/agent/delete`
+- `POST /api/agents/clear_all`
+- `POST /api/build_agent`
+- `GET /api/agent/versions`
+- `POST /api/agent/set_current_version`
+- `POST /api/agent/delete_version`
+- `GET /api/agents/list`
+- `POST /api/open_port`
+- `POST /api/stop_port`
+- `POST /api/open_ports`
+- `GET /api/port_events`
+- `GET /api/active_ports`
+- `GET /api/activity/shell`
+- `GET /api/activity/agent`
+- `GET /api/logs/victims`
+- `GET /api/logs/agents`
+- `GET /api/export/logs`
 
 ## Database
 
-The application uses SQLite for persistence. The database is automatically created at `database/c2.db` and includes tables for:
+The app uses SQLite at `database/c2.db` and includes tables for:
 
-- **victims**: Connected agents with system information
-- **port_events**: Network port activity tracking
-- **activity_logs**: Historical record of all C2 operations
+- `victims`
+- `port_events`
+- `activity_logs`
+- `agent_versions`
+- `agent_current_version`
 
 ## Logging
 
-Application logs are stored in the `logs/` directory. Log files include:
+Logs are stored in the `logs/` directory and include:
 
-- Server startup and shutdown events
-- Agent connections and disconnections
-- Command execution history
-- Error and warning messages
+- startup and shutdown events
+- agent registration and beacon activity
+- command execution history
+- errors and warnings
 
 ## Security Considerations
 
-⚠️ **Important**: This framework is intended for authorized security testing only.
+⚠️ **Important**: Use this framework only for authorized testing and Education purpose.
 
-- Change the Flask `SECRET_KEY` in production
-- Use HTTPS with valid certificates for production deployments
-- Enable RSA encryption for agent communications when possible
-- Implement network segmentation and access controls
-- Monitor and log all C2 activities
-- Use strong beacon delays to avoid detection
-- Consider using jitter to randomize communication patterns
+- change the Flask `SECRET_KEY` before production
+- use HTTPS in production deployments
+- enable RSA authentication for agent communications
+- implement access controls and network segmentation
+- monitor activity and log operations
+- use beacon delay and jitter to reduce detection risk
 
 ## License
 
@@ -254,12 +286,4 @@ See [LICENSE](LICENSE) for license information.
 
 ## Disclaimer
 
-This framework is provided for authorized security testing, red team exercises, and defensive research only. Unauthorized use of this framework against systems you do not own or have explicit permission to test is illegal. The authors assume no liability for misuse or damage caused by this software.
-
-## Contributing
-
-Contributions are welcome. Please ensure all changes are well-documented and tested.
-
-## Support
-
-For issues, questions, or contributions, please refer to the project documentation or contact the maintainers.
+This framework is provided for authorized security testing, red team exercises, and defensive research only. Unauthorized use against systems you do not own or do not have explicit permission to test is illegal. The authors assume no liability for misuse or damage caused by this software.
